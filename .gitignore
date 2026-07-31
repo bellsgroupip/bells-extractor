@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+
+# Modelos de Tesseract (grandes, se descargan aparte -- ver docstring de
+# extract_dni.py). No versionar binarios pesados en git.
+extractor/tessdata/

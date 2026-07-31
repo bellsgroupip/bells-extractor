@@ -1,0 +1,454 @@
+{
+  "name": "Bells Group - Revisión de Solicitud (borrador)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Antes de activar\n1. Configurar credenciales de Gmail y Google Drive en cada nodo (OAuth2).\n2. Ajustar el filtro del Gmail Trigger al mail real de Administración Bells Group.\n3. En 'Extraer Datos (Servicio)' cambiar la URL y el header X-API-Key por los del microservicio real (ver extractor/service/README.md).\n4. El servicio ya extrae SOLICITUD, AVAL y DNI de verdad, compara nombre/fecha de nacimiento SOLICITUD vs DNI, y corre un motor de completitud básico (check_completitud.py) sobre los Bloques 0/2/3/4/4b de la SOLICITUD. Ese motor NO diferencia por tipo de producto (Options 1 vida/2 vidas/Invest Future) -- no hay datos suficientes para inferir esa regla todavía, ver docstring de check_completitud.py. Falta: consistencia interna del PDF, checklist DOC, y reglas de negocio (PEP, Sujeto Obligado UIF).",
+        "height": 260,
+        "width": 380
+      },
+      "id": "78e564d8-69df-49bd-96e3-6f66a5b80ba8",
+      "name": "NOTA - Configurar credenciales",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "sender": "administracion@bellsgroup.com.ar"
+        },
+        "options": {}
+      },
+      "id": "e532641a-5022-4ce1-8b07-3a613ee5c64a",
+      "name": "Mail Nuevo Negocio",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Busca el texto plano del mail (n8n Gmail Trigger suele traerlo en 'text' o 'snippet')\nconst body = $json.text || $json.snippet || $json.html || '';\n\n// Busca la línea \"LINK DE DRIVE\" y la URL que sigue\nconst match = body.match(/LINK DE DRIVE[:\\s]*\\n?\\s*(https?:\\/\\/drive\\.google\\.com\\/\\S+)/i);\nconst driveUrl = match ? match[1].trim() : null;\n\n// Extrae el ID de la carpeta desde la URL (formato .../folders/<ID>...)\nlet folderId = null;\nif (driveUrl) {\n  const idMatch = driveUrl.match(/folders\\/([a-zA-Z0-9_-]+)/);\n  folderId = idMatch ? idMatch[1] : null;\n}\n\nreturn {\n  json: {\n    asunto: $json.subject || '',\n    driveUrl,\n    folderId,\n    linkEncontrado: !!folderId,\n  },\n};"
+      },
+      "id": "7206e0d7-b6bf-4b1f-9f8d-1f3339edbfcc",
+      "name": "Extraer Link de Drive",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        256,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "={{ $json.folderId }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "56636fab-be74-440f-8067-8affe0951486",
+      "name": "Listar Archivos Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        512,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Recibe la lista de archivos de la carpeta (un item por archivo) y arma UN solo item\n// resumen con los 3 documentos que nos importan para esta comparación.\n\nfunction buscar(items, patron) {\n  const encontrado = items.find(i => patron.test(i.json.name || ''));\n  return encontrado ? { fileId: encontrado.json.id, fileName: encontrado.json.name } : null;\n}\n\nconst solicitud = buscar($input.all(), /solicitud/i);\nconst dni        = buscar($input.all(), /\\bdni\\b/i);\nconst aval       = buscar($input.all(), /\\baval\\b/i);\n\n// Lista completa de nombres de archivo, para el chequeo de documentación (DOC) más adelante\nconst archivosEnCarpeta = $input.all().map(i => i.json.name);\n\nreturn [{\n  json: {\n    solicitudEncontrada: !!solicitud,\n    solicitud,\n    dni,\n    aval,\n    archivosEnCarpeta,\n  },\n}];"
+      },
+      "id": "24e92adf-63a4-4edd-aa99-699386e590aa",
+      "name": "Clasificar Archivos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        752,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-solicitud",
+              "leftValue": "={{ $json.solicitudEncontrada }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4cf54fcd-aae8-425b-b2ed-bedf2f4d1973",
+      "name": "Solicitud Encontrada",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1008,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "asunto",
+              "name": "asuntoAviso",
+              "type": "string",
+              "value": "=No se pudo procesar el negocio — {{ $json.asunto || 'sin asunto' }}"
+            },
+            {
+              "id": "cuerpo",
+              "name": "cuerpoAviso",
+              "type": "string",
+              "value": "No se encontró el archivo de SOLICITUD en la carpeta de Drive (o no se pudo acceder a la carpeta por permisos). Verificar el link enviado y que el archivo esté cargado con 'SOLICITUD' en el nombre."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "73ef0ab5-a7d9-4a66-9f2e-903b0721f658",
+      "name": "Armar Aviso Sin Solicitud",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1264,
+        608
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "=CAMBIAR-destinatario@bellsgroup.com.ar",
+        "subject": "={{ $json.asuntoAviso }}",
+        "message": "={{ $json.cuerpoAviso }}",
+        "options": {}
+      },
+      "id": "7e855460-9789-4431-83ac-82d8456f42ea",
+      "name": "Enviar Aviso Sin Solicitud",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1504,
+        608
+      ],
+      "webhookId": "55383a83-a6e0-452a-8698-8e538b027c66"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Convierte el item resumen en hasta 3 items (uno por documento encontrado),\n// para que el nodo de descarga de Drive procese cada uno.\nconst d = $input.first().json;\nconst items = [];\n\nif (d.solicitud) items.push({ json: { tipo: 'solicitud', fileId: d.solicitud.fileId, fileName: d.solicitud.fileName } });\nif (d.dni)       items.push({ json: { tipo: 'dni',       fileId: d.dni.fileId,       fileName: d.dni.fileName } });\nif (d.aval)      items.push({ json: { tipo: 'aval',      fileId: d.aval.fileId,      fileName: d.aval.fileName } });\n\n// Guardamos también la lista completa de archivos para el chequeo de documentación (DOC),\n// pegada en cada item para no perderla más adelante.\nfor (const it of items) it.json.archivosEnCarpeta = d.archivosEnCarpeta;\n\nreturn items;"
+      },
+      "id": "b494f116-1843-433b-b530-be0641277d7e",
+      "name": "Armar Lista de Descargas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1264,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.fileId }}"
+        },
+        "options": {}
+      },
+      "id": "315c67eb-2e39-42c0-a103-b54a0c65b402",
+      "name": "Descargar Archivo",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1504,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://CAMBIAR-tu-dominio-o-ip/extract",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "CAMBIAR-la-misma-clave-que-EXTRACTOR_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "tipo",
+              "value": "={{ $json.tipo }}"
+            },
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "343a46ce-eaeb-4b86-91e7-5ab862493be7",
+      "name": "Extraer Datos (Servicio)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "continueOnFail": true,
+      "position": [
+        1760,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// El microservicio (extractor/service/app.py) ya soporta los 3 tipos\n// (solicitud, aval, dni -- ver extract_solicitud.py / extract_aval.py /\n// extract_dni.py). Si igual llega un error acá (con 'continueOnFail'\n// activado en el nodo HTTP) es una falla real -- PDF corrupto, timeout,\n// servicio caído, etc. -- y corta el workflow en vez de taparla con datos\n// de prueba.\n//\n// Para tipo='solicitud' el servicio también corre el motor de\n// completitud (check_completitud.py) y devuelve 'incompletos' -- lo\n// guardamos aparte de 'campos' para que 'Consolidar y Chequear' lo pueda\n// usar directo.\n\nconst original = $('Descargar Archivo').item.json;\nconst tipo = original.tipo;\nconst respuesta = $json;\n\nif (respuesta.error) {\n  throw new Error(`Error llamando al microservicio extractor para '${tipo}' (${original.fileName}): ${JSON.stringify(respuesta.error)}`);\n}\n\nreturn {\n  json: {\n    ...original,\n    datosExtraidos: respuesta.campos,\n    datosIncompletos: respuesta.incompletos || [],\n  },\n};"
+      },
+      "id": "f1a2b3c4-5d6e-47f8-9a0b-1c2d3e4f5a6b",
+      "name": "Procesar Respuesta Extractor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Junta los items sueltos (solicitud/dni/aval) en un solo objeto y corre\n// las validaciones. Implementadas: completitud de la SOLICITUD (Bloques\n// 0/2/3/4/4b, vía check_completitud.py en el microservicio) y fecha de\n// nacimiento + nombre (SOLICITUD vs DNI). El resto -- consistencia\n// interna, documentación (DOC), reglas de negocio (PEP/UIF) -- sigue\n// pendiente.\n\nconst porTipo = {};\nfor (const item of $input.all()) {\n  porTipo[item.json.tipo] = item.json.datosExtraidos;\n}\nconst solicitudItem = $input.all().find((i) => i.json.tipo === 'solicitud');\nconst incompletosSolicitud = (solicitudItem && solicitudItem.json.datosIncompletos) || [];\nconst archivosEnCarpeta = $input.first().json.archivosEnCarpeta || [];\n\nconst errores = [];\nconst incompletos = [...incompletosSolicitud];\nconst docsFaltantes = [];\nconst reglasImportantes = [];\n\nconst solicitud = porTipo.solicitud || {};\nconst dni = porTipo.dni || {};\n\nfunction normalizar(s) {\n  return (s || '')\n    .toString()\n    .toUpperCase()\n    .normalize('NFD').replace(/[\\u0300-\\u036f]/g, '') // saca acentos\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\n// extract_dni.py devuelve la fecha como \"10 NOV 1977\" (OCR del frente del\n// DNI); extract_solicitud.py la devuelve como \"09/12/1989\". Hay que pasar\n// una al formato de la otra antes de comparar.\nconst MESES_ES = {\n  ENE: '01', FEB: '02', MAR: '03', ABR: '04', MAY: '05', JUN: '06',\n  JUL: '07', AGO: '08', SEP: '09', OCT: '10', NOV: '11', DIC: '12',\n};\n\nfunction fechaDniAFormatoSolicitud(fechaDni) {\n  if (!fechaDni) return null;\n  const partes = fechaDni.trim().split(/\\s+/);\n  if (partes.length < 3) return null;\n  const [dia, mesTexto, anio] = partes;\n  const mes = MESES_ES[mesTexto.toUpperCase()];\n  if (!mes || !/^\\d{1,2}$/.test(dia) || !/^\\d{4}$/.test(anio)) return null;\n  return `${dia.padStart(2, '0')}/${mes}/${anio}`;\n}\n\nconst nombreSolicitud = solicitud['SOLICITANTE / TOMADOR - Nombre y Apellido'];\nconst fechaNacSolicitud = solicitud['SOLICITANTE / TOMADOR - Fecha de nacimiento'];\nconst apellidoDni = dni['DNI - Apellido'];\nconst nombreDni = dni['DNI - Nombre'];\nconst fechaNacDni = dni['DNI - Fecha de nacimiento'];\nconst nombreDniCompleto = `${apellidoDni || ''} ${nombreDni || ''}`.trim();\n\n// --- Regla: fecha de nacimiento SOLICITUD vs DNI ---\nif (fechaNacSolicitud && fechaNacDni) {\n  const fechaDniConvertida = fechaDniAFormatoSolicitud(fechaNacDni);\n  if (!fechaDniConvertida) {\n    incompletos.push(\n      `No se pudo interpretar la fecha de nacimiento del DNI (\"${fechaNacDni}\") para compararla contra la Solicitud.`\n    );\n  } else if (fechaDniConvertida !== fechaNacSolicitud) {\n    errores.push(\n      `Fecha de nacimiento no coincide: Solicitud dice ${fechaNacSolicitud}, ` +\n      `DNI dice ${fechaNacDni} (${fechaDniConvertida}).`\n    );\n  }\n}\n\n// --- Regla: nombre y apellido SOLICITUD vs DNI ---\n// Compara por palabra (no por igualdad exacta de string) porque la\n// Solicitud trae el nombre completo en un solo campo y el DNI trae\n// Apellido/Nombre por separado, sin garantía de mismo orden.\nif (nombreSolicitud && nombreDniCompleto) {\n  const palabrasSolicitud = normalizar(nombreSolicitud).split(' ');\n  const palabrasDni = normalizar(nombreDniCompleto).split(' ').filter(Boolean);\n  const faltantes = palabrasDni.filter((p) => !palabrasSolicitud.includes(p));\n  if (faltantes.length > 0) {\n    errores.push(\n      `Nombre no coincide: Solicitud dice \"${nombreSolicitud}\", DNI dice ` +\n      `\"${nombreDniCompleto}\" (no aparece en la Solicitud: ${faltantes.join(', ')}).`\n    );\n  }\n}\n\n// --- Placeholders a completar con Reglas_Validacion / Reglas_Negocio ---\n// docsFaltantes.push(...)    // checklist DOC por tipo de negocio (archivosEnCarpeta)\n// reglasImportantes.push(...) // ej. PEP, Sujeto Obligado UIF, ingreso vs prima, etc.\n\nreturn [{\n  json: {\n    cliente: nombreSolicitud || nombreDniCompleto || '(sin identificar)',\n    errores,\n    incompletos,\n    docsFaltantes,\n    reglasImportantes,\n  },\n}];"
+      },
+      "id": "2e28b8f8-b8fc-4e74-b371-fabb9c579e56",
+      "name": "Consolidar y Chequear",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\n\nfunction seccion(titulo, lista) {\n  if (!lista.length) return `${titulo}: sin novedades.`;\n  return `${titulo}:\\n` + lista.map(x => ` - ${x}`).join('\\n');\n}\n\nconst cuerpo = [\n  `Informe de revisión — ${d.cliente}`,\n  '',\n  seccion('Errores del formulario', d.errores),\n  '',\n  seccion('Información incompleta', d.incompletos),\n  '',\n  seccion('Documentación faltante en el Drive', d.docsFaltantes),\n  '',\n  seccion('Reglas importantes a revisar', d.reglasImportantes),\n].join('\\n');\n\nreturn [{\n  json: {\n    asuntoInforme: `Revisión de negocio — ${d.cliente}`,\n    cuerpoInforme: cuerpo,\n  },\n}];"
+      },
+      "id": "3d83818d-9bb8-4a74-9df3-345ac8ea7677",
+      "name": "Armar Informe",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2480,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "=CAMBIAR-destinatario@bellsgroup.com.ar",
+        "subject": "={{ $json.asuntoInforme }}",
+        "message": "={{ $json.cuerpoInforme }}",
+        "options": {}
+      },
+      "id": "a8606bbb-abc8-4b79-b412-ded4676f1120",
+      "name": "Enviar Informe",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2720,
+        208
+      ],
+      "webhookId": "3411c234-e424-4334-a41d-0469485e4928"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Mail Nuevo Negocio": {
+      "main": [
+        [
+          {
+            "node": "Extraer Link de Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer Link de Drive": {
+      "main": [
+        [
+          {
+            "node": "Listar Archivos Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Listar Archivos Drive": {
+      "main": [
+        [
+          {
+            "node": "Clasificar Archivos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clasificar Archivos": {
+      "main": [
+        [
+          {
+            "node": "Solicitud Encontrada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Solicitud Encontrada": {
+      "main": [
+        [
+          {
+            "node": "Armar Lista de Descargas",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Armar Aviso Sin Solicitud",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar Aviso Sin Solicitud": {
+      "main": [
+        [
+          {
+            "node": "Enviar Aviso Sin Solicitud",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar Lista de Descargas": {
+      "main": [
+        [
+          {
+            "node": "Descargar Archivo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Descargar Archivo": {
+      "main": [
+        [
+          {
+            "node": "Extraer Datos (Servicio)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer Datos (Servicio)": {
+      "main": [
+        [
+          {
+            "node": "Procesar Respuesta Extractor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Procesar Respuesta Extractor": {
+      "main": [
+        [
+          {
+            "node": "Consolidar y Chequear",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consolidar y Chequear": {
+      "main": [
+        [
+          {
+            "node": "Armar Informe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar Informe": {
+      "main": [
+        [
+          {
+            "node": "Enviar Informe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "d5483b3e-ccfa-4530-af6b-ad83a205af99",
+  "meta": {
+    "instanceId": "c0b32c00932938f09a491536a6feaa4018b78a67ed95e5cc52a120ea2a1d76a8"
+  },
+  "nodeGroups": [],
+  "id": "KTfUznBbuRd0i3qj",
+  "tags": []
+}
