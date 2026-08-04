@@ -43,14 +43,33 @@ en el Drive, y reglas de negocio importantes (ej. PEP, Sujeto Obligado UIF).
      definió — ver nodo "Consolidar y Chequear". OJO: hoy solo verifica por NOMBRE DE
      ARCHIVO en la carpeta de Drive (no valida contenido ni a qué persona pertenece
      cada documento) — en escenarios con más de un DNI/AVAL requerido (Tomador ≠ Vida
-     Asegurada, Tercero Pagador) solo confirma que existe algún archivo de ese tipo,
-     no uno por persona (queda marcado como "verificar manualmente"). Para Tercero
-     Pagador tampoco se puede distinguir automáticamente persona física vs jurídica
-     (la Solicitud no trae esos datos — están en un formulario aparte, "Solicitud de
-     Tercero Pagador", que hoy no se descarga ni se extrae). Y "CSSEM en caso de
-     corresponder" para Options quedó sin poder automatizarse: a diferencia de Invest
-     Future, la Solicitud Options no trae un campo Sí/No de conformidad con la
-     declaración de salud que lo dispare.
+     Asegurada) solo confirma que existe algún archivo de ese tipo, no uno por persona
+     (queda marcado como "verificar manualmente"). "CSSEM en caso de corresponder"
+     para Options quedó sin poder automatizarse: a diferencia de Invest Future, la
+     Solicitud Options no trae un campo Sí/No de conformidad con la declaración de
+     salud que lo dispare.
+
+     DONE: extractor/extract_tercero_pagador.py extrae el formulario "Solicitud de
+     3ro Pagador" (Tomador/Pagador Física o Jurídica, socios del Anexo 1,
+     declaraciones PEP/UIF del Pagador, medio de pago, firmas) — calibrado contra el
+     único ejemplo disponible (pdfs-prueba/10_Tercero_Pagador_DS.pdf, Pagador Persona
+     Jurídica). Conectado al microservicio (tipo="tercero_pagador"), y al workflow
+     completo: "Clasificar Archivos" lo detecta (patrón "tercero"/"3ro" + "pagador"
+     en el nombre) y "Consolidar y Chequear" lo usa para dar el detalle exacto de
+     documentación exigida según sea Física o Jurídica (en vez del aviso genérico de
+     antes), cruza N° de Solicitud y nombre del Tomador contra la SOLICITUD, y suma
+     las declaraciones PEP/UIF propias del Pagador a las reglas de negocio.
+     HALLAZGO IMPORTANTE: Bells Group describió el escenario Tercero Pagador solo
+     para Invest Future, pero el ejemplo real disponible (Zurich
+     Options-AECLIF-1354029, Tercero Pagador Persona Jurídica) es una póliza
+     OPTIONS — así que el chequeo de Tercero Pagador se armó para aplicar a AMBAS
+     familias, no solo Invest Future.
+     Sigue pendiente (necesita más cambios de infraestructura, no solo reglas de
+     negocio): "Clasificar Archivos" solo toma 1 DNI y 1 AVAL por carpeta (no
+     distingue de quién es cada uno), así que en escenarios con Tercero Pagador o
+     Tomador ≠ Vida Asegurada el sistema sabe QUÉ documentos hacen falta pero no
+     puede confirmar que el archivo correcto (de la persona correcta) esté
+     efectivamente cargado.
   7. DONE: Reglas de negocio/compliance (PEP, Sujeto Obligado UIF por profesión) —
      mismo nodo. Profesiones y lógica exacta definidas por Bells Group (ver memoria
      `reglas_uif_pep_doc` en este proyecto).
