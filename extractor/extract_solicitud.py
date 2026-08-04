@@ -60,10 +60,9 @@ leyó a simple vista del PDF en vez de copiar el texto.
 
 Campos NO extraíbles por coordenadas simples (quedan pendientes,
 requieren una regla de negocio aparte, no un valor literal del PDF):
-  - "Cantidad de vidas aseguradas": no aparece como campo explícito en
-    ninguna página; se infiere contando si el bloque "Vida Asegurada 2"
-    tiene datos cargados. Implementar una vez esté el extractor del
-    Bloque 4b.
+  - "Cantidad de vidas aseguradas": DONE -- se infiere en
+    extract_solicitud() contando si el Bloque 4b encontró una Segunda
+    Vida Asegurada.
   - "Tomador distinto de la Vida Asegurada - Sí/No": con los Bloques 2 y 4
     ya andando, técnicamente se podría comparar
     "SOLICITANTE / TOMADOR - Nombre y Apellido" contra
@@ -76,10 +75,14 @@ requieren una regla de negocio aparte, no un valor literal del PDF):
     la 1" u otra cosa -- ver con Bells Group antes de implementarlo, para
     no adivinar una regla de negocio incorrecta.
   - "Tipo de firma": no hay una etiqueta "Firma manuscrita / digital"
-    en el texto; hay que mirar la página de Firmas (14. Firma...) y
-    decidir con qué criterio se clasifica (ej. presencia de imagen de
-    firma vs. certificado digital). Queda para cuando se ataque el
-    Bloque 14.
+    en el texto. Hallazgo técnico: el único PDF de prueba firmado por
+    DocuSign (SOLICITUD.pdf) trae la marca de agua "Docusign Envelope ID"
+    en la portada Y 6 imágenes embebidas en la página de Firmas; los
+    otros 4 PDF (sin firmar por DocuSign) no traen ni la marca de agua ni
+    imágenes ahí. Es una señal real pero con un solo ejemplo positivo --
+    ver con Bells Group qué valores exactos espera este campo (¿"Digital
+    (DocuSign)"/"Manuscrita"? ¿otra clasificación?) antes de
+    implementarlo, para no adivinar la taxonomía.
 
 Uso:
     python3 extract_solicitud.py "../pdfs-prueba/Zurich Options-AECLIF-1354029.pdf"
@@ -88,6 +91,7 @@ Uso:
 import json
 import re
 import sys
+import unicodedata
 
 from pdf_layout import (
     load_lines,
@@ -195,6 +199,22 @@ def _clean(s):
     return s if s else None
 
 
+def _palabras_nombre(s):
+    """Normaliza un nombre a un set de palabras (mayúsculas, sin acentos)
+    para comparar dos nombres sin importar el orden ni el formato
+    (ej. 'Apellido Nombre' vs 'Nombre Apellido')."""
+    if not s:
+        return set()
+    s = unicodedata.normalize("NFD", s.upper())
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return set(s.split())
+
+
+def _mismo_nombre(a, b):
+    palabras_a, palabras_b = _palabras_nombre(a), _palabras_nombre(b)
+    return bool(palabras_a) and palabras_a == palabras_b
+
+
 _LOWERCASE_ES = {"de", "del", "la", "las", "los", "y"}
 
 
@@ -225,13 +245,24 @@ def extract_bloque_0(pages):
         "N° de Solicitud / Póliza": None,
         "Fecha de solicitud": None,
         "Producto / Formulario": None,
-        "Cantidad de vidas aseguradas": None,  # TODO: derivado (ver docstring)
-        "Tomador distinto de la Vida Asegurada - Sí": "No marcado",  # TODO: derivado
-        "Tomador distinto de la Vida Asegurada - No": "No marcado",  # TODO: derivado
-        "Tipo de firma": None,  # TODO: derivado
+        "Cantidad de vidas aseguradas": None,  # se completa en extract_solicitud(), después del Bloque 4b
+        "Tomador distinto de la Vida Asegurada - Sí": "No marcado",  # se completa en extract_solicitud(), después del Bloque 4b
+        "Tomador distinto de la Vida Asegurada - No": "No marcado",  # ídem
+        "Tipo de firma": None,
     }
 
     page0 = pages[0]
+
+    # Tipo de firma: no hay una etiqueta "Firma manuscrita/digital" en el
+    # texto -- se infiere de la marca de agua que DocuSign estampa en la
+    # copia firmada digitalmente ("Docusign Envelope ID: ..."). Confirmado
+    # por Bells Group (2026-08-04): "Digital (DocuSign)" si aparece esa
+    # marca, "Manuscrita" si no.
+    campos["Tipo de firma"] = (
+        "Digital (DocuSign)"
+        if any("Docusign Envelope ID" in line["text"] for line in page0)
+        else "Manuscrita"
+    )
 
     # Producto / Formulario: el encabezado de la portada dice literal
     # "Zurich Options" o "Zurich Invest Future" (en alguna de las primeras
@@ -2309,6 +2340,35 @@ def extract_solicitud(pdf_path):
     campos.update(extract_bloque_3(all_lines))
     campos.update(extract_bloque_4(all_lines))
     campos.update(extract_bloque_4b(all_lines))
+    # "Cantidad de vidas aseguradas" no aparece como campo explícito en
+    # ningún lado del PDF -- se infiere de si el Bloque 4b encontró una
+    # Segunda Vida Asegurada (mismo campo centinela que ya usa
+    # check_completitud.py para saber si esa sección existe).
+    campos["Cantidad de vidas aseguradas"] = (
+        "2" if campos.get("VIDA ASEGURADA 2 - Sexo - Masculino") is not None else "1"
+    )
+
+    # "Tomador distinto de la Vida Asegurada": confirmado por Bells Group
+    # (2026-08-04) -- "Sí" si el Tomador no coincide con AL MENOS UNA de
+    # las Vidas Aseguradas presentes (no solo la 1). Ej. real: en una
+    # póliza de 2 vidas donde el Tomador coincide con la Vida Asegurada 1
+    # pero la Vida Asegurada 2 es una persona distinta, el campo va "Sí"
+    # igual, porque hay un participante de la póliza distinto del
+    # Tomador.
+    nombre_tomador = campos.get("SOLICITANTE / TOMADOR - Nombre y Apellido")
+    nombres_vidas = [
+        n
+        for n in (
+            campos.get("VIDA ASEGURADA 1 - Nombre y Apellido"),
+            campos.get("VIDA ASEGURADA 2 - Nombre y Apellido"),
+        )
+        if n
+    ]
+    if nombre_tomador and nombres_vidas:
+        distinto = not all(_mismo_nombre(nombre_tomador, n) for n in nombres_vidas)
+        campos["Tomador distinto de la Vida Asegurada - Sí"] = "Marcado" if distinto else "No marcado"
+        campos["Tomador distinto de la Vida Asegurada - No"] = "No marcado" if distinto else "Marcado"
+
     campos.update(extract_bloque_5(all_lines))
     campos.update(extract_bloque_6(all_lines))
     campos.update(extract_bloque_6c(all_lines, campos["Producto / Formulario"]))

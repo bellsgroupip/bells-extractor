@@ -19,9 +19,11 @@ en el Drive, y reglas de negocio importantes (ej. PEP, Sujeto Obligado UIF).
      en Base_Combinada (~90-95% de coincidencia en la mayoría; ver el docstring del
      script para los campos derivados/no calibrados que quedan pendientes y 2
      hallazgos de PDF con glitches de renderizado puntuales, no atribuibles al
-     extractor). Pendiente: revisar con Bells Group las 3 reglas de negocio que no
-     se pueden completar por coordenadas simples (cantidad de vidas aseguradas,
-     tomador distinto de la vida asegurada, tipo de firma).
+     extractor). Los 4 campos derivados del Bloque 0 (cantidad de vidas aseguradas,
+     tomador distinto de la vida asegurada, tipo de firma) ya están implementados —
+     Bells Group confirmó las reglas el 2026-08-04 (el Tomador cuenta como "distinto"
+     si no coincide con AL MENOS UNA Vida Asegurada presente; "Tipo de firma" se
+     infiere de la marca de agua de DocuSign).
   2. Extractor simple de DNI/AVAL (nombre, DNI, fecha de nacimiento) — ya armado en
      /extractor/extract_dni.py y /extractor/extract_aval.py.
   3. DONE: Motor de reglas de completitud (extractor/check_completitud.py) — cubre

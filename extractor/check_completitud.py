@@ -167,15 +167,12 @@ _CAMPOS_ASIGNACION_FONDOS = [
     "Asignación Zurich Performance Tech % (dólar)",
 ]
 
-# Campos de Bloque 0 que son derivados (todavía no extraídos por
-# coordenadas, ver docstring de extract_solicitud.py) -- no se chequean
-# acá como "incompletos", ya están señalados aparte como pendientes.
-_DERIVADOS_BLOQUE_0 = {
-    "Cantidad de vidas aseguradas",
-    "Tomador distinto de la Vida Asegurada - Sí",
-    "Tomador distinto de la Vida Asegurada - No",
-    "Tipo de firma",
-}
+# Los 4 campos derivados del Bloque 0 ("Cantidad de vidas aseguradas",
+# "Tomador distinto de la Vida Asegurada - Sí/No", "Tipo de firma") ya
+# están todos implementados en extract_solicitud() y siempre quedan
+# completos -- este set queda vacío, se mantiene por si aparece un nuevo
+# campo derivado sin terminar de resolver.
+_DERIVADOS_BLOQUE_0 = set()
 
 # Bloques 6/6c: "Enfermedad Grave", "Renta Familiar" y "Pérdida de
 # Miembros" son EXCLUSIVOS de Options -- Invest Future no tiene un
