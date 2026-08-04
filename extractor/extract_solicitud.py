@@ -4,29 +4,35 @@ SIN IA. Lee un PDF de solicitud y devuelve un dict con los campos del
 Diccionario_Campos de /base/Base_Combinada_Solicitudes_Zurich.xlsx.
 
 ESTADO ACTUAL (ver CLAUDE.md, punto 1 de "lo que falta"):
-Implementados: Bloque 0 ("0. Documento" -- solo lo literal), Bloque 2
-("2. SOLICITANTE / TOMADOR", 37 campos), Bloque 3 ("3. SOLICITANTE
-CONJUNTO", 19 campos -- queda todo en None si la solicitud es de 1 vida),
-Bloque 4 ("4. VIDA ASEGURADA 1" / Primera Vida Asegurada, 28 campos),
-Bloque 4b ("4b. VIDA ASEGURADA 2" / Segunda Vida Asegurada, mismos 28
-campos que el 4 -- también en None si es de 1 vida), Bloque 5
-("5. Seguros existentes", 12 campos por Vida Asegurada), Bloque 6
-("6/6b. Beneficios Options", 24 campos por Vida Asegurada -- SOLO pólizas
-Options; Invest Future tiene su propia sección "6c", no implementada, y
-queda todo en None), Bloque 7 ("7. Moneda/Inversión", 12 campos --
-"Cuenta Individual" es de ambas familias, el resto exclusivo Invest
-Future), Bloque 8 ("8. Prima", 19 campos -- Vanishing/Actualización son
-de Options, Incremento anual es de Invest Future), Bloque 9
-("9. Débito", 6 campos -- Tarjeta/CBU se derivan de cuál trae dígitos),
-Bloque 10 ("10. BENEFICIARIOS PRINCIPALES", hasta 3, tabla por columnas)
-y Bloque 11 ("11. BENEFICIARIOS CONTINGENTES", hasta 2 + checkboxes
-Opción A/B). El resto de los bloques (Declaraciones/PEP, Privacidad,
-Firmas) se agregan siguiendo el mismo patrón: reutilizar
-pdf_layout.find_line / value_between / checkbox_marked /
-nearest_checkbox_label sobre _flatten(pages) (no asumir un número de
-página fijo: el mismo bloque cae
-en distinta página según la plantilla -- Options 1 vida / 2 vidas /
-Invest Future).
+Implementados TODOS los bloques del Diccionario_Campos: Bloque 0
+("0. Documento" -- solo lo literal), Bloque 2 ("2. SOLICITANTE /
+TOMADOR", 37 campos), Bloque 3 ("3. SOLICITANTE CONJUNTO", 19 campos --
+queda todo en None si la solicitud es de 1 vida), Bloque 4
+("4. VIDA ASEGURADA 1" / Primera Vida Asegurada, 28 campos), Bloque 4b
+("4b. VIDA ASEGURADA 2" / Segunda Vida Asegurada, mismos 28 campos que el
+4 -- también en None si es de 1 vida), Bloque 5 ("5. Seguros existentes",
+12 campos por Vida Asegurada), Bloque 6 ("6/6b. Beneficios Options", 24
+campos por Vida Asegurada -- SOLO pólizas Options), Bloque 6c
+("Beneficios Invest Future", 19 campos, un solo set por póliza -- SOLO
+Invest Future, filtrado explícito por "Producto / Formulario"), Bloque 7
+("7. Moneda/Inversión", 12 campos -- "Cuenta Individual" es de ambas
+familias, el resto exclusivo Invest Future), Bloque 8 ("8. Prima", 19
+campos -- Vanishing/Actualización son de Options, Incremento anual es de
+Invest Future), Bloque 9 ("9. Débito", 6 campos -- Tarjeta/CBU se derivan
+de cuál trae dígitos), Bloque 10 ("10. BENEFICIARIOS PRINCIPALES", hasta
+3, tabla por columnas), Bloque 11 ("11. BENEFICIARIOS CONTINGENTES",
+hasta 2 + checkboxes Opción A/B), Bloque 12 ("12. Declaraciones / PEP /
+CRS-FATCA", 19 campos -- "Declaración de Salud" exclusivo Invest Future;
+2 campos del Solicitante Conjunto no se extraen, ver docstring de
+extract_bloque_12), Bloque 13 ("13. Privacidad", 1 campo) y Bloque 14
+("14. Firmas", 7 campos -- "SOLICITANTE CONJUNTO"/"VIDA ASEGURADA 2" sin
+validar contra un ejemplo real legible, ver docstring de
+extract_bloque_14).
+
+Todo esto reutiliza el mismo patrón: pdf_layout.find_line / value_between
+/ checkbox_marked / nearest_checkbox_label sobre _flatten(pages) (no
+asumir un número de página fijo: el mismo bloque cae en distinta página
+según la plantilla -- Options 1 vida / 2 vidas / Invest Future).
 
 OJO -- hallazgo importante del Bloque 6: en 2 de los 3 PDF Options de
 prueba, el título de esa sección viene con "Seguro" corrompido
@@ -38,6 +44,19 @@ planilla probablemente pisó el mismo problema. Este extractor ya lo
 resuelve con una búsqueda tolerante (regex), así que va a sacar más datos
 de los que hoy figuran en Base_Combinada para esas 2 filas -- no es un
 error del extractor, es la Base la que está incompleta ahí.
+
+OJO -- segundo hallazgo, en las páginas de Privacidad y Firmas (Bloques
+13/14): en el único PDF de 2 vidas disponible (Zurich
+Options-AECLIF-1354029), esas 2 páginas puntuales vienen con el texto
+interlineado carácter por carácter entre dos renglones distintos (ej.
+"Firmdae Slo licitante AclarAaBEcL MiE�NDnIL AHARZU" en vez de "Firma del
+Solicitante Aclaración ABEL MENDILAHARZU") -- ilegible tanto para
+pdfplumber.extract_text() como para extract_words(), en ambas páginas por
+igual. Es un defecto de generación de esas 2 páginas en ESE PDF puntual
+(las páginas anteriores del mismo archivo están perfectas), no un bug de
+este extractor -- confirmado que Base_Combinada sí tiene los nombres de
+esa solicitud cargados, probablemente porque quien armó la planilla los
+leyó a simple vista del PDF en vez de copiar el texto.
 
 Campos NO extraíbles por coordenadas simples (quedan pendientes,
 requieren una regla de negocio aparte, no un valor literal del PDF):
@@ -1124,9 +1143,14 @@ def extract_bloque_6(all_lines):
     su propia sección "6c", no implementada) queda todo en None.
 
     "Beneficio de Renta Familiar" no usa "Monto" sino "Renta anual" /
-    "Años" -- se extrae aparte y NO está validado contra un ejemplo real
-    con "Sí" marcado (en la única solicitud de prueba con este bloque
-    contestó "No")."""
+    "Años" -- se extrae aparte (con SOLICITUD.pdf ya hay un ejemplo real
+    con "Sí" marcado para calibrar la posición: "Renta anual" trae el
+    monto pegado en la misma línea del checkbox, "Años" está 2 líneas más
+    abajo, en la oración "Si contesta Sí, indique el monto del beneficio
+    ... y Años <valor>"). Solo se asigna a la Vida 1: no hay ningún
+    ejemplo real de 2 vidas con este beneficio marcado "Sí" para
+    confirmar si el layout de 2 columnas (Primera/Segunda Vida) aplica
+    también acá."""
     campos = {}
     for n in (1, 2):
         prefix = "VIDA ASEGURADA 1 - " if n == 1 else "VIDA ASEGURADA 2 - "
@@ -1187,7 +1211,16 @@ def extract_bloque_6(all_lines):
             campos[prefix + f"{nombre_campo} - Sí"] = r[n]["si"]
             campos[prefix + f"{nombre_campo} - No"] = r[n]["no"]
             if con_monto:
-                campos[prefix + f"{nombre_campo} - Monto"] = r[n]["monto"]
+                # Algunos captions traen una palabra fija después (ej.
+                # "Monto Semanal" en la plantilla Invest Future, cuando
+                # este bloque engancha ahí por compartir título con el
+                # 6c -- ver check_completitud.py) que _valores_por_etiqueta
+                # se lleva puesta como si fuera el importe. Se descarta
+                # cualquier resultado no numérico.
+                monto = r[n]["monto"]
+                campos[prefix + f"{nombre_campo} - Monto"] = (
+                    monto if monto and re.fullmatch(r"[\d.,]+", monto) else None
+                )
 
     # Monto del Seguro de Vida Adicional: no tiene Sí/No, siempre se carga.
     # Ojo: la propia línea del título empieza con la palabra "Monto"
@@ -1214,19 +1247,30 @@ def extract_bloque_6(all_lines):
     idx = find_line(all_lines, ["Beneficio por Enfermedad Grave"], start=idx_seccion)
     _volcar("Enfermedad Grave", idx)
 
-    # Renta Familiar: el Sí/No sale igual que los demás beneficios, pero
-    # "Monto anual" y "Años" NO se intentan extraer -- en los 5 ejemplos
-    # disponibles esta pregunta siempre salió "No", así que no hay ninguna
-    # fila real con esos valores cargados para calibrar la posición (y la
-    # línea de encabezado "Renta anual / Renta anual" por columna es
-    # indistinguible de una fila de valores sin un ejemplo real que la
-    # contraste). Quedan en None hasta que aparezca un caso con "Sí".
+    # Renta Familiar: el Sí/No sale igual que los demás beneficios.
     idx = find_line(all_lines, ["Beneficio de Renta Familiar"], start=idx_seccion)
     r = _beneficio_si_no_monto(all_lines, idx, umbral_col2, con_monto=False)
     for n in ((1, 2) if umbral_col2 is not None else (1,)):
         prefix = "VIDA ASEGURADA 1 - " if n == 1 else "VIDA ASEGURADA 2 - "
         campos[prefix + "Renta Familiar - Sí"] = r[n]["si"]
         campos[prefix + "Renta Familiar - No"] = r[n]["no"]
+
+    # "Monto anual" viene pegado a la etiqueta "Renta anual" en la misma
+    # línea del checkbox; "Años" está 2 líneas más abajo, pegado a "Años"
+    # en la oración "Si contesta Sí, indique el monto del beneficio
+    # (valor anualizado) y Años <valor>". Solo se asigna a Vida 1 (ver
+    # docstring de extract_bloque_6: sin ejemplo real de 2 vidas acá).
+    if idx is not None:
+        linea_checkbox = all_lines[idx]
+        valor_monto = _clean(_value_after_label(linea_checkbox, "anual"))
+        if valor_monto and re.fullmatch(r"[\d.,]+", valor_monto):
+            campos["VIDA ASEGURADA 1 - Renta Familiar - Monto anual"] = valor_monto
+
+        idx_anios = find_line(all_lines, ["indique el monto del beneficio"], start=idx)
+        if idx_anios is not None:
+            valor_anios = _clean(_value_after_label(all_lines[idx_anios], "Años"))
+            if valor_anios and valor_anios.isdigit():
+                campos["VIDA ASEGURADA 1 - Renta Familiar - Años"] = valor_anios
 
     idx = find_line(all_lines, ["Beneficio por Muerte Accidental"], start=idx_seccion)
     _volcar("Muerte Accidental", idx)
@@ -1854,6 +1898,408 @@ def extract_bloque_11(all_lines):
     return campos
 
 
+# ---------------------------------------------------------------------
+# Bloque 6c. Beneficios Invest Future (póliza) -- SOLO aplica a pólizas
+# Invest Future (Options tiene su propio "Bloque 6", ver más arriba).
+# ---------------------------------------------------------------------
+def extract_bloque_6c(all_lines, producto_formulario):
+    """6c. Beneficios Invest Future (póliza) -- a diferencia del Bloque 6
+    (Options), acá el Diccionario_Campos define un solo set de campos por
+    póliza, no uno por Vida Asegurada (así lo aclara el propio nombre del
+    bloque, "(póliza)") -- confirmado contra Base_Combinada.
+
+    OJO -- a diferencia de casi todos los demás bloques, este SÍ necesita
+    filtrar explícitamente por familia ("Producto / Formulario" del
+    Bloque 0) en vez de confiar en que el texto buscado no exista en la
+    otra plantilla: 4 de estos 7 beneficios ("Beneficio por
+    Hospitalización", "Beneficio por Muerte Accidental", "Beneficio de
+    Exención de Pago de Primas", "Beneficio por Invalidez Total y
+    Permanente") tienen el MISMO caption literal que su equivalente en el
+    Bloque 6 de Options -- sin este filtro, correr esto sobre una
+    solicitud Options terminaría copiando (mal) los valores del Bloque 6
+    acá, cuando Base_Combinada los marca "N/A" para Options.
+
+    Validado contra los 2 únicos ejemplos reales disponibles (Invest
+    Future Joven y Tomador distinto) -- en ambos, los 7 beneficios
+    contestaron "No", así que los campos "Monto" (Seguro de Vida
+    Adicional, Vida decreciente) no tienen ningún caso real con datos
+    para calibrar y quedan sin extraer (None) si no encuentran un valor
+    numérico limpio."""
+    campos = {
+        "Seguro de Vida Adicional - Sí": None,
+        "Seguro de Vida Adicional - No": None,
+        "Seguro de Vida Adicional - Monto": None,
+        "Pago en adición a Cuenta Individual - Sí": None,
+        "Pago en adición a Cuenta Individual - No": None,
+        "Vida decreciente - Sí": None,
+        "Vida decreciente - No": None,
+        "Vida decreciente - Monto": None,
+        "Hospitalización - Sí": None,
+        "Hospitalización - No": None,
+        "Hospitalización - Monto": None,
+        "Muerte Accidental - Sí": None,
+        "Muerte Accidental - No": None,
+        "Muerte Accidental - Monto": None,
+        "Exención de Pago de Primas - Sí": None,
+        "Exención de Pago de Primas - No": None,
+        "Invalidez Total y Permanente - Sí": None,
+        "Invalidez Total y Permanente - No": None,
+        "Invalidez Total y Permanente - Monto": None,
+    }
+    if producto_formulario != "Zurich Invest Future":
+        return campos
+
+    idx = find_line(all_lines, ["Seguro de Vida Adicional"])
+    r = _beneficio_si_no_monto(all_lines, idx, umbral_col2=None, con_monto=True)
+    campos["Seguro de Vida Adicional - Sí"] = r[1]["si"]
+    campos["Seguro de Vida Adicional - No"] = r[1]["no"]
+    campos["Seguro de Vida Adicional - Monto"] = r[1]["monto"]
+
+    idx = None
+    for i, line in enumerate(all_lines):
+        if "pague en adición a la cuenta Individual" in line["text"]:
+            idx = i
+            break
+    if idx is not None:
+        grupos = _grupos_si_no(all_lines[idx])
+        if grupos:
+            _, si, no = grupos[0]
+            campos["Pago en adición a Cuenta Individual - Sí"] = si
+            campos["Pago en adición a Cuenta Individual - No"] = no
+
+    idx = find_line(all_lines, ["opción de seguro de vida decreciente"])
+    if idx is not None:
+        grupos = _grupos_si_no(all_lines[idx])
+        if grupos:
+            _, si, no = grupos[0]
+            campos["Vida decreciente - Sí"] = si
+            campos["Vida decreciente - No"] = no
+
+    idx = find_line(all_lines, ["Beneficio por Hospitalización"])
+    r = _beneficio_si_no_monto(all_lines, idx, umbral_col2=None, con_monto=True)
+    campos["Hospitalización - Sí"] = r[1]["si"]
+    campos["Hospitalización - No"] = r[1]["no"]
+    # "Monto" acá es en realidad "Monto Semanal" -- la palabra fija
+    # "Semanal" que sigue al caption cae justo donde _valores_por_etiqueta
+    # espera el valor tipeado, y sin filtrar se la lleva puesta como si
+    # fuera un importe. Se descarta cualquier resultado no numérico.
+    monto = r[1]["monto"]
+    campos["Hospitalización - Monto"] = monto if monto and re.fullmatch(r"[\d.,]+", monto) else None
+
+    idx = find_line(all_lines, ["Beneficio por Muerte Accidental"])
+    r = _beneficio_si_no_monto(all_lines, idx, umbral_col2=None, con_monto=True)
+    campos["Muerte Accidental - Sí"] = r[1]["si"]
+    campos["Muerte Accidental - No"] = r[1]["no"]
+    campos["Muerte Accidental - Monto"] = r[1]["monto"]
+
+    # OJO: acá el caption dice "Beneficio POR Exención..." -- en el Bloque
+    # 6 (Options) la misma pregunta dice "Beneficio DE Exención..."
+    # (confirmado contra los PDF de las 2 familias, no es un typo).
+    idx = find_line(all_lines, ["Beneficio por Exención de Pago de Primas"])
+    r = _beneficio_si_no_monto(all_lines, idx, umbral_col2=None, con_monto=False)
+    campos["Exención de Pago de Primas - Sí"] = r[1]["si"]
+    campos["Exención de Pago de Primas - No"] = r[1]["no"]
+
+    idx = find_line(all_lines, ["Beneficio por Invalidez Total y Permanente"])
+    r = _beneficio_si_no_monto(all_lines, idx, umbral_col2=None, con_monto=True)
+    campos["Invalidez Total y Permanente - Sí"] = r[1]["si"]
+    campos["Invalidez Total y Permanente - No"] = r[1]["no"]
+    campos["Invalidez Total y Permanente - Monto"] = r[1]["monto"]
+
+    return campos
+
+
+# ---------------------------------------------------------------------
+# Bloque 12. Declaraciones / PEP / CRS-FATCA
+# ---------------------------------------------------------------------
+def _grupos_si_no_flex(line):
+    """Como _grupos_si_no, pero probando primero la etiqueta con tilde
+    ("Sí") y si no encuentra nada la etiqueta sin tilde ("Si") -- la
+    pregunta de residencia fiscal y la de contribuyente EE.UU. vienen con
+    tilde en 2 de los 3 PDF de referencia y sin tilde en el tercero (glitch
+    de tipeo puntual de Zurich, no algo sistemático)."""
+    grupos = _grupos_si_no(line, "Sí", "No")
+    if not grupos:
+        grupos = _grupos_si_no(line, "Si", "No")
+    return grupos
+
+
+_RE_SI_JURAMENTO = re.compile(r"S\s?[ií]\b", re.IGNORECASE)
+_RE_NO_JURAMENTO = re.compile(r"N\s?[oó]\b", re.IGNORECASE)
+
+
+def _si_no_juramento(texto):
+    """Como _grupos_si_no, pero opera sobre el texto crudo de la línea (no
+    sobre 'words' exactas) -- necesario para las 3 declaraciones juradas
+    de este bloque (Sujeto Obligado / PLA-FT / PEP). En 1 de los 5 PDF de
+    prueba (Options 2 vidas, Zurich Options-AECLIF-1354029) el
+    renderizador mete un espacio suelto adentro de 'Sí'/'No' en estas
+    líneas puntuales ('S i N o' en vez de 'Sí No'), lo que hace que cada
+    letra salga como una 'word' separada para pdfplumber -- _grupos_si_no
+    (que compara texto exacto de word) no las reconoce ahí."""
+    m_si = _RE_SI_JURAMENTO.search(texto)
+    m_no = _RE_NO_JURAMENTO.search(texto)
+    if not m_si or not m_no:
+        return "No marcado", "No marcado"
+    si_marcado, no_marcado = "No marcado", "No marcado"
+    for m_x in re.finditer(r"(?<!\S)X(?!\S)", texto):
+        x = m_x.start()
+        if abs(x - m_si.start()) < abs(x - m_no.start()):
+            si_marcado = "Marcado"
+        else:
+            no_marcado = "Marcado"
+    return si_marcado, no_marcado
+
+
+def extract_bloque_12(all_lines):
+    """12. Declaraciones / PEP / CRS-FATCA.
+
+    "Declaración de Salud 'conforme'/'no conforme'" es EXCLUSIVO de
+    Invest Future -- confirmado contra Base_Combinada (viene "N/A" en las
+    3 Options de prueba). No se filtra por familia como en el Bloque 6c
+    porque el caption ("Me encuentro en condiciones de afirmar...") no
+    tiene equivalente en Options, así que ya sale None solo si no está.
+
+    "Jurisdicción fiscal adicional" y "Número identificación tributaria"
+    NO se extraen: en los 5 ejemplos de prueba esa tabla siempre viene con
+    "No disponible" pre-impreso en sus 3 filas (un placeholder del PDF, no
+    un dato real tipeado) porque nadie contestó "Sí" a residencia fiscal
+    fuera de Argentina -- no hay ningún caso real con esa tabla cargada
+    para calibrar dónde cae el valor real.
+
+    Los 2 campos "Solicitante Conjunto - ¿...? - No" (residencia fiscal /
+    contribuyente EE.UU.) tampoco se extraen: en el único ejemplo real de
+    2 vidas (Mendilaharzu/Llorente), la fila de checkbox del Solicitante
+    Conjunto queda partida en dos líneas por pdf_layout (la 'X' cae en una
+    línea y el 'Si No' al que pertenece en la siguiente), y con un solo
+    ejemplo no alcanza para calibrar una heurística confiable -- ver
+    hallazgo en el docstring de este módulo."""
+    campos = {
+        "Declaración de Salud 'conforme' - Sí": None,
+        "Declaración de Salud 'no conforme' - Sí": None,
+        "Domicilio fiscal del tomador": None,
+        "¿Residencia fiscal fuera de Argentina? - Sí": None,
+        "¿Residencia fiscal fuera de Argentina? - No": None,
+        "Jurisdicción fiscal adicional": None,
+        "Número identificación tributaria": None,
+        "¿Contribuyente/residente EE.UU.? - Sí": None,
+        "¿Contribuyente/residente EE.UU.? - No": None,
+        "¿Sujeto Obligado ante la UIF (Art. 20 Ley 25.246)? - Sí": None,
+        "¿Sujeto Obligado ante la UIF? - No": None,
+        "¿Cumple normativa PLA/FT? - Sí": None,
+        "¿Cumple normativa PLA/FT? - No": None,
+        "¿PEP - Persona Expuesta Políticamente? - Sí": None,
+        "¿PEP? - No": None,
+        "PEP - Motivo detallado": None,
+        "Solicitante Conjunto - Domicilio fiscal": None,
+        "Solicitante Conjunto - ¿Residencia fiscal fuera AR? - No": None,
+        "Solicitante Conjunto - ¿Contribuyente EE.UU.? - No": None,
+    }
+
+    idx = None
+    for i, line in enumerate(all_lines):
+        if "Me encuentro en condiciones de afirmar" in line["text"]:
+            idx = i
+            break
+    if idx is not None:
+        line = all_lines[idx]
+        x0 = word_x0(line, "Me")
+        if x0 is not None:
+            campos["Declaración de Salud 'conforme' - Sí"] = checkbox_marked(line, x0)
+
+    idx = None
+    for i, line in enumerate(all_lines):
+        if "No me encuentro en condiciones de afirmar" in line["text"]:
+            idx = i
+            break
+    if idx is not None:
+        line = all_lines[idx]
+        x0 = word_x0(line, "No")
+        if x0 is not None:
+            campos["Declaración de Salud 'no conforme' - Sí"] = checkbox_marked(line, x0)
+
+    idx = find_line(all_lines, ["Domicilio de residencia fiscal del tomador"])
+    if idx is not None:
+        campos["Domicilio fiscal del tomador"] = _titlecase_es(
+            _value_after_label(all_lines[idx], "tomador")
+        )
+
+    idx = find_line(all_lines, ["residencia fiscal en una jurisdicción"])
+    if idx is not None:
+        grupos = _grupos_si_no_flex(all_lines[idx])
+        if grupos:
+            _, si, no = grupos[-1]
+            campos["¿Residencia fiscal fuera de Argentina? - Sí"] = si
+            campos["¿Residencia fiscal fuera de Argentina? - No"] = no
+
+    idx = find_line(all_lines, ["contribuyente, ciudadano o residente de los Estados Unidos"])
+    if idx is not None:
+        grupos = _grupos_si_no_flex(all_lines[idx])
+        if grupos:
+            _, si, no = grupos[0]
+            campos["¿Contribuyente/residente EE.UU.? - Sí"] = si
+            campos["¿Contribuyente/residente EE.UU.? - No"] = no
+
+    idx = find_line(all_lines, ["soy Sujeto Obligado"])
+    if idx is not None:
+        si, no = _si_no_juramento(all_lines[idx]["text"])
+        campos["¿Sujeto Obligado ante la UIF (Art. 20 Ley 25.246)? - Sí"] = si
+        campos["¿Sujeto Obligado ante la UIF? - No"] = no
+
+    idx = find_line(all_lines, ["cumplo con las disposiciones vigentes"])
+    if idx is not None:
+        si, no = _si_no_juramento(all_lines[idx]["text"])
+        campos["¿Cumple normativa PLA/FT? - Sí"] = si
+        campos["¿Cumple normativa PLA/FT? - No"] = no
+
+    idx_pep = None
+    for i, line in enumerate(all_lines):
+        if "Personas Expuestas" in line["text"]:
+            idx_pep = i
+            break
+    if idx_pep is not None:
+        si, no = _si_no_juramento(all_lines[idx_pep]["text"])
+        campos["¿PEP - Persona Expuesta Políticamente? - Sí"] = si
+        campos["¿PEP? - No"] = no
+
+        idx_motivo = find_line(all_lines, ["indicar detalladamente el motivo"], start=idx_pep)
+        if idx_motivo is not None:
+            line = all_lines[idx_motivo]
+            valor = _value_after_label(line, "motivo:") or ""
+            # El motivo real puede venir pegado después de "el motivo:" en
+            # la misma línea, seguido del resto del párrafo boilerplate
+            # ("Además, asume el compromiso...") -- se corta ahí y se
+            # sacan los guiones bajos que Zurich usa como renglón en
+            # blanco para completar a mano (ej. "E__X_ D_I_R_E_C_T_O_R").
+            valor = valor.split("Además")[0].replace("_", "").strip()
+            valor = re.sub(r"\s+", " ", valor) if valor else None
+            if not valor:
+                # o puede venir en el renglón anterior, como una línea
+                # corta suelta (visto en el ejemplo Options 1 vida).
+                anterior = all_lines[idx_motivo - 1] if idx_motivo > 0 else None
+                if anterior is not None and 0 < len(anterior["words"]) <= 6:
+                    valor = _clean(anterior["text"])
+            campos["PEP - Motivo detallado"] = valor
+
+    idx = None
+    for i in range(len(all_lines) - 1, -1, -1):
+        if "tomador conjunto" in all_lines[i]["text"]:
+            idx = i
+            break
+    if idx is not None:
+        campos["Solicitante Conjunto - Domicilio fiscal"] = _titlecase_es(
+            _value_after_label(all_lines[idx], "conjunto")
+        )
+
+    return campos
+
+
+# ---------------------------------------------------------------------
+# Bloque 13. Privacidad
+# ---------------------------------------------------------------------
+def extract_bloque_13(all_lines):
+    """13. Comunicación de privacidad y consentimiento -- un solo campo,
+    el consentimiento de marketing (checkbox tildado a mano)."""
+    campos = {"Consentimiento de marketing - Marcado": None}
+
+    idx = None
+    for i, line in enumerate(all_lines):
+        if "consentimiento para ser" in line["text"]:
+            idx = i
+            break
+    if idx is not None:
+        line = all_lines[idx]
+        x0 = word_x0(line, "Yo/Nosotros")
+        if x0 is not None:
+            campos["Consentimiento de marketing - Marcado"] = checkbox_marked(line, x0)
+
+    return campos
+
+
+# ---------------------------------------------------------------------
+# Bloque 14. Firmas
+# ---------------------------------------------------------------------
+def extract_bloque_14(all_lines):
+    """14. Firma y Certificación del Productor Asesor -- nombres
+    aclarados a mano al pie de cada firma, más los datos del Productor.
+
+    "FIRMA SOLICITANTE CONJUNTO" y "FIRMA VIDA ASEGURADA 2" (solo
+    aplican en pólizas de 2 vidas) NO están validados contra un ejemplo
+    real: el único PDF de 2 vidas disponible (Zurich
+    Options-AECLIF-1354029) tiene esta página con un glitch de
+    renderizado que interlínea caracteres de dos líneas de texto entre sí
+    (ej. "Firmdae Slo licitante AclarAaBEcL MiE�NDnIL AHARZU" en vez de
+    "Firma del Solicitante Aclaración ABEL MENDILAHARZU") -- ilegible
+    tanto para pdfplumber como para este extractor, no es un bug de la
+    extracción por coordenadas. El patrón de caption para estos 2 campos
+    está escrito por simetría con "Solicitante"/"Vida Asegurada 1", pero
+    sin un PDF de 2 vidas legible no se pudo confirmar el texto exacto."""
+    campos = {
+        "FIRMA SOLICITANTE / TOMADOR (aclaración)": None,
+        "FIRMA SOLICITANTE CONJUNTO (aclaración)": None,
+        "FIRMA VIDA ASEGURADA 1 (aclaración)": None,
+        "FIRMA VIDA ASEGURADA 2 (aclaración)": None,
+        "Productor Asesor - Nombre": None,
+        "Productor Asesor - N° de Productor": None,
+        "Productor Asesor - Matrícula S.S.N.": None,
+    }
+
+    idx = find_line(all_lines, ["Firma", "del", "Solicitante", "Aclaración"])
+    if idx is not None:
+        campos["FIRMA SOLICITANTE / TOMADOR (aclaración)"] = _titlecase_es(
+            _value_after_label(all_lines[idx], "Aclaración")
+        )
+
+    idx = find_line(all_lines, ["Firma", "del", "Solicitante", "Conjunto", "Aclaración"])
+    if idx is not None:
+        campos["FIRMA SOLICITANTE CONJUNTO (aclaración)"] = _titlecase_es(
+            _value_after_label(all_lines[idx], "Aclaración")
+        )
+
+    idx = find_line(all_lines, ["Firma", "de", "la", "Vida", "Asegurada", "Aclaración"])
+    if idx is not None:
+        campos["FIRMA VIDA ASEGURADA 1 (aclaración)"] = _titlecase_es(
+            _value_after_label(all_lines[idx], "Aclaración")
+        )
+    idx = find_line(all_lines, ["Primera", "Vida", "Asegurada", "Aclaración"])
+    if idx is not None:
+        campos["FIRMA VIDA ASEGURADA 1 (aclaración)"] = _titlecase_es(
+            _value_after_label(all_lines[idx], "Aclaración")
+        )
+
+    idx = find_line(all_lines, ["Segunda", "Vida", "Asegurada", "Aclaración"])
+    if idx is not None:
+        campos["FIRMA VIDA ASEGURADA 2 (aclaración)"] = _titlecase_es(
+            _value_after_label(all_lines[idx], "Aclaración")
+        )
+
+    idx = find_line(all_lines, ["Firma", "del", "Productor", "Asesor", "Aclaración"])
+    if idx is not None:
+        campos["Productor Asesor - Nombre"] = _titlecase_es(
+            _value_after_label(all_lines[idx], "Aclaración")
+        )
+
+    idx = find_line(all_lines, ["N°", "de", "Productor"])
+    if idx is not None:
+        line = all_lines[idx]
+        fin = word_x1(line, "Productor")
+        inicio_matricula = word_x0(line, "Matrícula")
+        if fin is not None and inicio_matricula is not None:
+            campos["Productor Asesor - N° de Productor"] = _clean(
+                value_between(line, fin, inicio_matricula)
+            )
+        idx_ssn = word_x1(line, "S.S.N.")
+        if idx_ssn is not None:
+            # El valor viene precedido de un segundo "N°" repetido
+            # ("...Matrícula S.S.N. N° 78138") -- se descarta y se toma
+            # solo los dígitos.
+            m = re.search(r"(\d[\d.]*)\s*$", value_between(line, idx_ssn, 10_000))
+            if m:
+                campos["Productor Asesor - Matrícula S.S.N."] = m.group(1)
+
+    return campos
+
+
 def extract_solicitud(pdf_path):
     pages = load_lines(pdf_path)
     all_lines = _flatten(pages)
@@ -1865,11 +2311,15 @@ def extract_solicitud(pdf_path):
     campos.update(extract_bloque_4b(all_lines))
     campos.update(extract_bloque_5(all_lines))
     campos.update(extract_bloque_6(all_lines))
+    campos.update(extract_bloque_6c(all_lines, campos["Producto / Formulario"]))
     campos.update(extract_bloque_7(all_lines))
     campos.update(extract_bloque_8(all_lines))
     campos.update(extract_bloque_9(all_lines))
     campos.update(extract_bloque_10(all_lines))
     campos.update(extract_bloque_11(all_lines))
+    campos.update(extract_bloque_12(all_lines))
+    campos.update(extract_bloque_13(all_lines))
+    campos.update(extract_bloque_14(all_lines))
     return campos
 
 

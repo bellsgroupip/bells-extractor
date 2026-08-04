@@ -12,17 +12,18 @@ en el Drive, y reglas de negocio importantes (ej. PEP, Sujeto Obligado UIF).
   trigger de mail, extracción del link de Drive, listado y clasificación de archivos
   (SOLICITUD/DNI/AVAL), rama de "no encontrado", descarga de los 3 archivos.
 - Lo que falta programar de verdad (hoy son placeholders con datos de prueba):
-  1. Extractor real de la SOLICITUD por coordenadas (pdfplumber, agrupando por línea,
-     SIN IA) que lea el PDF y devuelva los ~295 campos según el esquema de
-     /base/Base_Combinada_Solicitudes_Zurich.xlsx (hoja Diccionario_Campos).
-     EN PROGRESO: /extractor/extract_solicitud.py ya extrae completo el
-     Bloque 0 (Documento) y el Bloque 2 (Solicitante/Tomador, 37 campos),
-     validado contra las 3 solicitudes de /pdfs-prueba que tienen fila de
-     referencia en Base_Combinada (~95% de coincidencia; las diferencias
-     restantes son 3 campos derivados que no están como texto literal en
-     el PDF — ver el docstring del script). Falta repetir el mismo patrón
-     para los bloques 3, 4, 4b, 5 a 14.
-  2. Extractor simple de DNI/AVAL (nombre, DNI, fecha de nacimiento).
+  1. DONE: Extractor real de la SOLICITUD por coordenadas (pdfplumber, agrupando por
+     línea, SIN IA) — /extractor/extract_solicitud.py ya cubre TODOS los bloques del
+     Diccionario_Campos (0, 2, 3, 4, 4b, 5, 6, 6c, 7, 8, 9, 10, 11, 12, 13, 14),
+     validado contra las 5 solicitudes de /pdfs-prueba que tienen fila de referencia
+     en Base_Combinada (~90-95% de coincidencia en la mayoría; ver el docstring del
+     script para los campos derivados/no calibrados que quedan pendientes y 2
+     hallazgos de PDF con glitches de renderizado puntuales, no atribuibles al
+     extractor). Pendiente: revisar con Bells Group las 3 reglas de negocio que no
+     se pueden completar por coordenadas simples (cantidad de vidas aseguradas,
+     tomador distinto de la vida asegurada, tipo de firma).
+  2. Extractor simple de DNI/AVAL (nombre, DNI, fecha de nacimiento) — ya armado en
+     /extractor/extract_dni.py y /extractor/extract_aval.py.
   3. Motor de reglas de completitud (contra Diccionario_Campos, según el tipo de
      producto: Options 1 vida / Options 2 vidas / Invest Future).
   4. Reglas de consistencia interna del PDF (checkbox contradictorios, porcentajes

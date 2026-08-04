@@ -85,9 +85,8 @@ async def extract(
 
         campos = extractor(tmp_path)
         respuesta = {"archivo": file.filename, "campos": campos}
-        # El motor de completitud (check_completitud.py) hoy solo cubre los
-        # campos de SOLICITUD (Bloques 0/2/3/4/4b) -- para DNI/AVAL no
-        # aplica todavía.
+        # El motor de completitud (check_completitud.py) hoy cubre todos los
+        # Bloques de la SOLICITUD (0 a 14) -- para DNI/AVAL no aplica todavía.
         if tipo == "solicitud":
             respuesta["incompletos"] = verificar_completitud(campos)
         return respuesta
