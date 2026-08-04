@@ -27,9 +27,14 @@ en el Drive, y reglas de negocio importantes (ej. PEP, Sujeto Obligado UIF).
   3. DONE: Motor de reglas de completitud (extractor/check_completitud.py) — cubre
      todos los bloques (0 a 14), con chequeo por fila de Beneficiarios y filtrado por
      familia Options/Invest Future donde corresponde.
-  4. Reglas de consistencia interna del PDF (checkbox contradictorios, porcentajes
-     de beneficiarios que no suman 100%, montos que superan límites, etc.) — sigue
-     pendiente.
+  4. DONE: Reglas de consistencia interna del PDF (extractor/check_consistencia.py)
+     — checkboxes contradictorios (reutiliza la lista de condicionales del motor de
+     completitud, en la dirección opuesta), % de Beneficiarios Principales que no
+     suman 100, y montos de Beneficios Adicionales que superan el Seguro de Vida
+     Adicional (regla impresa literalmente en el PDF). A propósito NO incluye
+     límites de edad por beneficio (son texto estático del PDF, no datos
+     extraídos) ni % de incremento de primas (el propio checkbox del PDF ya
+     restringe los valores posibles, no hay nada que validar ahí).
   5. DONE: Reglas de consistencia cruzada SOLICITUD vs DNI/AVAL (nombre, DNI, N° de
      documento, CUIT) — nodo "Consolidar y Chequear" del workflow.
   6. Checklist "Validar DOC": DONE (best-effort) para los escenarios que Bells Group

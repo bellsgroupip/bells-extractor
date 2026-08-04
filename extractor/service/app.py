@@ -34,6 +34,7 @@ from extract_solicitud import extract_solicitud
 from extract_aval import extract_aval
 from extract_dni import extract_dni
 from check_completitud import verificar_completitud
+from check_consistencia import verificar_consistencia
 
 app = FastAPI(title="Bells Group - Extractor Solicitudes Zurich")
 
@@ -85,10 +86,13 @@ async def extract(
 
         campos = extractor(tmp_path)
         respuesta = {"archivo": file.filename, "campos": campos}
-        # El motor de completitud (check_completitud.py) hoy cubre todos los
-        # Bloques de la SOLICITUD (0 a 14) -- para DNI/AVAL no aplica todavía.
+        # El motor de completitud (check_completitud.py) y el de
+        # consistencia interna (check_consistencia.py) hoy cubren todos
+        # los Bloques de la SOLICITUD (0 a 14) -- para DNI/AVAL no aplica
+        # todavía.
         if tipo == "solicitud":
             respuesta["incompletos"] = verificar_completitud(campos)
+            respuesta["inconsistencias"] = verificar_consistencia(campos)
         return respuesta
     except Exception as exc:  # noqa: BLE001 - queremos devolver el error al workflow
         raise HTTPException(status_code=500, detail=f"Error extrayendo el PDF: {exc}")
