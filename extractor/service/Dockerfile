@@ -21,7 +21,9 @@ COPY service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Módulos del extractor (nivel /extractor)
-COPY pdf_layout.py extract_solicitud.py extract_aval.py extract_dni.py check_completitud.py ./
+COPY pdf_layout.py extract_solicitud.py extract_aval.py extract_dni.py \
+     extract_tercero_pagador.py extract_cssem.py \
+     check_completitud.py check_consistencia.py ./
 COPY tessdata ./tessdata
 # Servicio HTTP
 COPY service/app.py ./

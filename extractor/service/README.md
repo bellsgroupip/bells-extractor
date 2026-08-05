@@ -12,6 +12,15 @@ PDF descargado de Drive y recibe el JSON con los campos extraídos.
 
 ## 2. Build y run
 
+`tessdata/` (modelos de Tesseract para `extract_dni.py`) está en
+`.gitignore` -- no viaja con `git clone`. Antes del primer build, copiar ahí
+`eng.traineddata` y `spa.traineddata` (los mismos que usa el entorno de
+desarrollo, para que el OCR se comporte igual en dev y en el servidor):
+
+```bash
+scp extractor/tessdata/*.traineddata usuario@servidor:/ruta/al/repo/extractor/tessdata/
+```
+
 Parado dentro de la carpeta `extractor` (no dentro de `extractor/service`):
 
 ```bash
@@ -68,8 +77,9 @@ Reemplaza al nodo `PLACEHOLDER Extraer Datos`:
 - Body Content Type: `Form-Data` (multipart)
   - `file`: el binario del PDF descargado (viene del nodo "Descargar
     Archivo" anterior)
-  - `tipo`: `solicitud` | `aval` | `dni` (según qué documento se esté
-    mandando; ver "Armar Lista de Descargas" en el workflow)
+  - `tipo`: `solicitud` | `aval` | `dni` | `tercero_pagador` | `cssem`
+    (según qué documento se esté mandando; ver "Armar Lista de Descargas"
+    en el workflow)
 - La respuesta trae los campos en `campos`, listos para usarlos en el nodo
   "Consolidar y Chequear".
 
