@@ -74,6 +74,21 @@ en el Drive, y reglas de negocio importantes (ej. PEP, Sujeto Obligado UIF).
      mismo nodo. Profesiones y lógica exacta definidas por Bells Group (ver memoria
      `reglas_uif_pep_doc` en este proyecto).
 
+     DONE: extractor/extract_cssem.py extrae del "Cuestionario de Salud Sin Examen
+     Médico" (CSSEM) la Pregunta 7 (¿consultó a un médico / se sometió a algún examen
+     o investigación médica?, con Razón/Fecha/Resultado si es "Sí") — calibrado
+     contra el único ejemplo disponible (pdfs-prueba/CSSEM -DS-.pdf). Conectado al
+     microservicio (tipo="cssem") y al workflow completo: "Clasificar Archivos" lo
+     detecta (patrón "cssem"/"cuestionario"+"salud" en el nombre) y "Consolidar y
+     Chequear" compara la fecha declarada en la Pregunta 7 contra la "Fecha de
+     solicitud" (Bloque 0 de la SOLICITUD) — regla confirmada por Bells Group
+     (2026-08-05): si la consulta/examen fue hecho DENTRO de los 3 meses de la fecha
+     de la Solicitud, avisa en "Reglas importantes" que Zurich va a solicitar los
+     análisis correspondientes; si fue hecho hace MÁS de 3 meses, no hace falta
+     avisar (pueden no pedirlos). No cubre el resto del formulario (las otras 11
+     preguntas de "Datos médicos") — no se pidió, y esta regla puntual es lo único
+     que hoy se compara contra la SOLICITUD.
+
 ## Cómo probar
 Los PDF de /pdfs-prueba son solicitudes reales ya usadas para armar la base de
 referencia. Sirven para testear el extractor sin tener que esperar un mail nuevo.
