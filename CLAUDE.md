@@ -87,7 +87,12 @@ en el Drive, y reglas de negocio importantes (ej. PEP, Sujeto Obligado UIF).
      análisis correspondientes; si fue hecho hace MÁS de 3 meses, no hace falta
      avisar (pueden no pedirlos). No cubre el resto del formulario (las otras 11
      preguntas de "Datos médicos") — no se pidió, y esta regla puntual es lo único
-     que hoy se compara contra la SOLICITUD.
+     que hoy se compara contra la SOLICITUD. CORRECCIÓN IMPORTANTE (Bells Group,
+     2026-08-05): CSSEM es EXCLUSIVO de Options — Invest Future NUNCA lo requiere,
+     sin importar la "Declaración de Salud" de la Vida Asegurada. La regla de la
+     Pregunta 7 solo se evalúa si "Producto / Formulario" es "Zurich Options"; se
+     sacó del todo el chequeo de CSSEM que antes existía en la rama Invest Future
+     (disparaba con "Declaración de Salud 'no conforme'" — estaba mal, ya no está).
 
 ## Cómo probar
 Los PDF de /pdfs-prueba son solicitudes reales ya usadas para armar la base de
