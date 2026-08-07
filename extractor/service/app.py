@@ -1,8 +1,8 @@
 """
 Microservicio HTTP que envuelve los extractores (pdf_layout.py /
 extract_solicitud.py / extract_aval.py / extract_dni.py /
-extract_tercero_pagador.py / extract_cssem.py) para que n8n lo pueda
-llamar con un nodo HTTP Request.
+extract_tercero_pagador.py / extract_cssem.py / extract_reproyeccion.py)
+para que n8n lo pueda llamar con un nodo HTTP Request.
 
 Por qué existe este servicio: la instancia de n8n de Bells Group (n8n Cloud)
 no tiene disponible el nodo "Execute Command", así que no se puede correr
@@ -15,7 +15,7 @@ Endpoints:
   POST /extract             -> extrae los campos de un PDF
        form-data:
          file: el PDF (binario)
-         tipo: "solicitud" | "aval" | "dni" | "tercero_pagador" | "cssem"
+         tipo: "solicitud" | "aval" | "dni" | "tercero_pagador" | "cssem" | "reproyeccion"
        header:
          X-API-Key: <EXTRACTOR_API_KEY> (ver variable de entorno)
 
@@ -36,6 +36,7 @@ from extract_aval import extract_aval
 from extract_dni import extract_dni
 from extract_tercero_pagador import extract_tercero_pagador
 from extract_cssem import extract_cssem
+from extract_reproyeccion import extract_reproyeccion
 from check_completitud import verificar_completitud
 from check_consistencia import verificar_consistencia
 
@@ -51,6 +52,7 @@ EXTRACTORES = {
     "dni": extract_dni,
     "tercero_pagador": extract_tercero_pagador,
     "cssem": extract_cssem,
+    "reproyeccion": extract_reproyeccion,
 }
 
 
@@ -76,7 +78,7 @@ async def extract(
     if extractor is None:
         raise HTTPException(
             status_code=400,
-            detail=f"tipo='{tipo}' no soportado (usar solicitud, aval, dni, tercero_pagador o cssem)",
+            detail=f"tipo='{tipo}' no soportado (usar solicitud, aval, dni, tercero_pagador, cssem o reproyeccion)",
         )
 
     if not file.filename.lower().endswith(".pdf"):
