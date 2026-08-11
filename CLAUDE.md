@@ -10,7 +10,12 @@ en el Drive, y reglas de negocio importantes (ej. PEP, Sujeto Obligado UIF).
 ## Estado actual
 - El workflow de n8n (/n8n/Bells_Revision_Solicitud.json) tiene armado y funcional:
   trigger de mail, extracción del link de Drive, listado y clasificación de archivos
-  (SOLICITUD/DNI/AVAL), rama de "no encontrado", descarga de los 3 archivos.
+  (SOLICITUD/DNI/AVAL), rama de "no encontrado", descarga de los 3 archivos. La rama
+  de "no encontrado" tiene 2 casos, ambos responden EN EL MISMO HILO del mail original
+  (Gmail "Reply"): (a) sin link de Drive en el mail -- avisa que respondan adjuntando
+  el link; (b) con link pero sin archivo de SOLICITUD en la carpeta -- avisa eso y
+  además si el DNI y el AVAL se encontraron o no en la carpeta (usa lo que
+  "Clasificar Archivos" ya identificó, aunque no haya SOLICITUD).
 - Lo que falta programar de verdad (hoy son placeholders con datos de prueba):
   1. DONE: Extractor real de la SOLICITUD por coordenadas (pdfplumber, agrupando por
      línea, SIN IA) — /extractor/extract_solicitud.py ya cubre TODOS los bloques del

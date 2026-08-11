@@ -123,28 +123,12 @@
     },
     {
       "parameters": {
-        "assignments": {
-          "assignments": [
-            {
-              "id": "asunto",
-              "name": "asuntoAviso",
-              "type": "string",
-              "value": "=No se pudo procesar el negocio — {{ $json.asunto || 'sin asunto' }}"
-            },
-            {
-              "id": "cuerpo",
-              "name": "cuerpoAviso",
-              "type": "string",
-              "value": "No se encontró el archivo de SOLICITUD en la carpeta de Drive (o no se pudo acceder a la carpeta por permisos). Verificar el link enviado y que el archivo esté cargado con 'SOLICITUD' en el nombre."
-            }
-          ]
-        },
-        "options": {}
+        "jsCode": "// Arma el aviso cuando no se encontró la SOLICITUD en la carpeta de Drive,\n// pero SÍ hay que informar si el DNI y el AVAL (los dos documentos que\n// siempre deberían estar, sin importar el escenario) se encontraron en la\n// carpeta. Tercero Pagador/CSSEM/Reproyección no se mencionan acá -- son\n// opcionales según el caso, y sin la SOLICITUD no hay forma de saber si\n// corresponden.\nconst datos = $input.first().json;\n\nconst estadoDni = datos.dni ? `encontrado (${datos.dni.fileName})` : 'NO encontrado';\nconst estadoAval = datos.aval ? `encontrado (${datos.aval.fileName})` : 'NO encontrado';\n\nconst asuntoOriginal = $('Extraer Link de Drive').item.json.asunto || 'sin asunto';\n\nconst cuerpo =\n  \"No se encontró el archivo de SOLICITUD en la carpeta de Drive (o no se pudo acceder a la carpeta por permisos). \" +\n  \"Verificar el link enviado y que el archivo esté cargado con 'SOLICITUD' en el nombre.\\n\\n\" +\n  `DNI: ${estadoDni}.\\n` +\n  `AVAL: ${estadoAval}.`;\n\nreturn [{\n  json: {\n    asuntoAviso: `No se pudo procesar el negocio -- falta la SOLICITUD (${asuntoOriginal})`,\n    cuerpoAviso: cuerpo,\n  },\n}];\n"
       },
       "id": "73ef0ab5-a7d9-4a66-9f2e-903b0721f658",
       "name": "Armar Aviso Sin Solicitud",
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         1264,
         608
