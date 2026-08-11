@@ -144,6 +144,24 @@ en el Drive, y reglas de negocio importantes (ej. PEP, Sujeto Obligado UIF).
      Pregunta 7 solo se evalúa si "Producto / Formulario" es "Zurich Options"; se
      sacó del todo el chequeo de CSSEM que antes existía en la rama Invest Future
      (disparaba con "Declaración de Salud 'no conforme'" — estaba mal, ya no está).
+  8. NUEVO (2026-08-11), workflow SEPARADO del de Revisión de Solicitud:
+     /n8n/Bells_Tabla_DNI_AVAL.json ("Bells Group - Tabla DNI-AVAL", n8n id
+     `4Hw4RfrmYjiCVu6j`, activo). Se dispara con cualquier mail cuyo asunto
+     contenga "AVALES" (no reutiliza el trigger "Mail Nuevo Negocio"), toma
+     los ADJUNTOS del mail directamente (no un link de Drive), clasifica cada
+     uno por nombre de archivo (dni/aval), los manda al mismo microservicio
+     extractor, y agrega una fila por documento en 2 pestañas nuevas de
+     Base_Combinada_Solicitudes_Zurich: "DNI" (Nombre, Apellido, Fecha de
+     Nacimiento, Lugar de Nacimiento, N° de DNI, N° de CUIT/CUIL, Archivo,
+     Fecha de carga) y "AVAL" (Razón Social/Nombre y Apellido, CUIT/CUIL,
+     Domicilio, Provincia, Localidad, Código Postal, Archivo, Fecha de
+     carga). TODAVÍA NO PROBADO con una ejecución real (falta mandar un mail
+     de prueba con asunto "AVALES" y adjuntos) — en particular, la opción
+     "Download Attachments" del trigger de Gmail y el nombre exacto de la
+     propiedad binaria que genera no se pudieron verificar sin un caso real
+     (el código de "Separar y Clasificar Adjuntos" es defensivo al respecto,
+     itera sobre cualquier clave binaria en vez de asumir un nombre fijo,
+     pero puede necesitar ajustes reales).
 
 ## Cómo probar
 Los PDF de /pdfs-prueba son solicitudes reales ya usadas para armar la base de
