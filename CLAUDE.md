@@ -37,6 +37,24 @@ en el Drive, y reglas de negocio importantes (ej. PEP, Sujeto Obligado UIF).
      infiere de la marca de agua de DocuSign).
   2. Extractor simple de DNI/AVAL (nombre, DNI, fecha de nacimiento) — ya armado en
      /extractor/extract_dni.py y /extractor/extract_aval.py.
+     extract_dni.py (2026-08-11): calibrado contra 4 DNI reales (antes solo 1) —
+     reveló que el extractor viejo fallaba en 3 de los 4 (no por bugs de lógica,
+     sino porque son fotos/escaneos de peor calidad que el ejemplo original).
+     Dos cambios de fondo: (a) el MRZ del dorso (código de máquina ICAO 9303)
+     se usa como fuente PRIMARIA de Documento/Fecha de nacimiento/Apellido/
+     Nombre — se lee mucho más limpio que las etiquetas impresas en fotos de
+     baja calidad; las etiquetas del frente quedan como respaldo. (b)
+     preprocesado de imagen (upscale 2x + gris + autocontraste + nitidez)
+     para cuando sí hay que leer etiquetas impresas, y matching insensible a
+     mayúsculas/acentos (cubre el formato viejo "libreta", con etiquetas en
+     mayúscula fija en vez de bilingües). Campos nuevos agregados — Domicilio,
+     Lugar de nacimiento, CUIL — salen del dorso, best-effort (calidad
+     variable: en 2 de los 4 ejemplos reales el CUIL se lee bien, en los
+     otros 2 no aparece con ninguna combinación de OCR probada; si no se
+     encuentra queda en None, no se inventa ni se calcula). PENDIENTE: el
+     formato "libreta" vieja (sin MRZ, ejemplo real disponible pero sin
+     calibrar del todo) sigue sin extraer Apellido/Nombre/Documento de forma
+     confiable — necesitaría más ejemplos de ese formato para calibrar mejor.
      El AVAL no es una plantilla única -- extract_aval.py reconoce 2 (ARCA
      Monotributo y ANSES CUIL/CUIT, calibradas cada una contra un ejemplo
      real en /pdfs-prueba) detectando el TÍTULO del documento antes de
