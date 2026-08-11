@@ -14,6 +14,13 @@ Esta plantilla no trae DNI ni fecha de nacimiento, solo CUIT. El chequeo
 cruzado contra la SOLICITUD debería hacerse por CUIT/nombre, no por fecha
 de nacimiento (a diferencia del DNI).
 
+El domicilio viene en una sola línea "Calle Número" (ej. "SANTIAGO DEL
+ESTERO 157"); se separa por el último token si es numérico o "S/N", igual
+que la SOLICITUD separa Calle/Número. Si el domicilio es de barrio (sin
+calle+altura, ej. "B° SAN CAYETANO MZA 5 CASA 10") la separación puede
+quedar mal dividida -- no se pidió un campo "Barrio" aparte, así que ese
+caso queda solo como una Calle mal cortada, no se pierde el dato.
+
 Uso:
     python3 extract_aval.py "../pdfs-prueba/AVAL PAZ, AGUSTIN.pdf"
 """
@@ -30,6 +37,16 @@ def _clean(s):
     return s if s else None
 
 
+def _split_calle_numero(domicilio):
+    texto = (domicilio or "").strip()
+    if not texto:
+        return None, None
+    m = re.match(r"^(.*\S)\s+(S/N|\d+[A-Za-z°]*)$", texto)
+    if m:
+        return _clean(m.group(1)), _clean(m.group(2))
+    return _clean(texto), None
+
+
 def extract_aval(pdf_path):
     pages = load_lines(pdf_path)
     page0 = pages[0]
@@ -37,7 +54,8 @@ def extract_aval(pdf_path):
     campos = {
         "AVAL - CUIT": None,
         "AVAL - Nombre y Apellido / Razón Social": None,
-        "AVAL - Domicilio": None,
+        "AVAL - Calle": None,
+        "AVAL - Número": None,
         "AVAL - Localidad": None,
         "AVAL - Código Postal": None,
         "AVAL - Provincia": None,
@@ -60,7 +78,9 @@ def extract_aval(pdf_path):
         if idx + 1 < len(page0):
             campos["AVAL - Nombre y Apellido / Razón Social"] = _clean(page0[idx + 1]["text"])
         if idx + 2 < len(page0):
-            campos["AVAL - Domicilio"] = _clean(page0[idx + 2]["text"])
+            calle, numero = _split_calle_numero(page0[idx + 2]["text"])
+            campos["AVAL - Calle"] = calle
+            campos["AVAL - Número"] = numero
         if idx + 3 < len(page0):
             campos["AVAL - Localidad"] = _clean(page0[idx + 3]["text"])
         if idx + 4 < len(page0):

@@ -38,7 +38,8 @@ en el Drive, y reglas de negocio importantes (ej. PEP, Sujeto Obligado UIF).
      extraídos) ni % de incremento de primas (el propio checkbox del PDF ya
      restringe los valores posibles, no hay nada que validar ahí).
   5. DONE: Reglas de consistencia cruzada SOLICITUD vs DNI/AVAL (nombre, DNI, N° de
-     documento, CUIT) — nodo "Consolidar y Chequear" del workflow.
+     documento, CUIT, y domicilio: Calle/Número/Localidad/Provincia) — nodo
+     "Consolidar y Chequear" del workflow.
   6. Checklist "Validar DOC": DONE (best-effort) para los escenarios que Bells Group
      definió — ver nodo "Consolidar y Chequear". OJO: hoy solo verifica por NOMBRE DE
      ARCHIVO en la carpeta de Drive (no valida contenido ni a qué persona pertenece
