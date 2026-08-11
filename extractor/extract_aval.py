@@ -1,28 +1,47 @@
 """
 Extractor real del AVAL, por coordenadas (pdfplumber), SIN IA.
 
-ESTADO ACTUAL / SUPUESTO IMPORTANTE:
-El único ejemplo de AVAL disponible hoy (pdfs-prueba/AVAL PAZ, AGUSTIN.pdf)
-es una Constancia de Opción al Régimen Simplificado (Monotributo) que emite
-ARCA/AFIP -- no una carta de garantía personal. Este script asume esa
-plantilla (es un PDF generado por el sitio de ARCA, con texto seleccionable
-y estructura fija). Si en la práctica llega un AVAL con otro formato (otra
-constancia, una nota escaneada, etc.), este extractor no lo va a reconocer
-y hace falta un patrón nuevo -- avisar apenas aparezca un caso así.
+ESTADO ACTUAL: el AVAL no es un único formato -- son constancias de
+ARCA/AFIP/ANSES (no una carta de garantía personal), y hay más de una
+plantilla válida. Reconoce 2 hoy:
 
-Esta plantilla no trae DNI ni fecha de nacimiento, solo CUIT. El chequeo
-cruzado contra la SOLICITUD debería hacerse por CUIT/nombre, no por fecha
-de nacimiento (a diferencia del DNI).
+1. "Monotributo" (pdfs-prueba/AVAL PAZ, AGUSTIN.pdf) -- Constancia de
+   Opción al Régimen Simplificado de ARCA. Trae CUIT, nombre, domicilio
+   completo (Calle/Número/Localidad/CP/Provincia), régimen/categoría,
+   actividad y vigencia. NO trae DNI ni fecha de nacimiento -- el cruce
+   contra la SOLICITUD se hace por CUIT/nombre/domicilio, no por fecha de
+   nacimiento (a diferencia del DNI).
+2. "CUIL/CUIT" (pdfs-prueba/CONSTANCIA_CUIL.pdf) -- Constancia de CUIL/CUIT
+   de ANSES. Mucho más simple: Titular (nombre), Documento (DNI) y
+   CUIL/CUIT. NO trae domicilio -- los campos de domicilio/régimen quedan
+   en None para esta plantilla.
 
-El domicilio viene en una sola línea "Calle Número" (ej. "SANTIAGO DEL
-ESTERO 157"); se separa por el último token si es numérico o "S/N", igual
-que la SOLICITUD separa Calle/Número. Si el domicilio es de barrio (sin
-calle+altura, ej. "B° SAN CAYETANO MZA 5 CASA 10") la separación puede
-quedar mal dividida -- no se pidió un campo "Barrio" aparte, así que ese
-caso queda solo como una Calle mal cortada, no se pierde el dato.
+HALLAZGO REAL (2026-08-11, ejecución 247): un AVAL real (Zurich, cliente
+TUERO) resultó ser una TERCERA plantilla de ARCA no reconocida (parece una
+Constancia de Inscripción general, mencionaba "IMPUESTOS/REGÍMENES
+NACIONALES REGISTRADOS", "GANANCIAS PERSONAS FÍSICAS", "IVA"). La versión
+vieja de este script asumía SIEMPRE la plantilla Monotributo y buscaba
+"CUIT:" en cualquier parte del PDF -- como esa constancia también tiene esa
+cadena en otro contexto (una tabla de impuestos), el script agarró texto de
+las filas de esa tabla como si fueran Nombre/Calle/Localidad, generando
+errores falsos ("Nombre no coincide", "Domicilio no coincide") en el
+informe. FIX: ahora la plantilla se detecta por la PRIMERA LÍNEA del PDF
+(título del documento) antes de extraer nada -- si no matchea ninguna
+plantilla conocida, devuelve todos los campos en None en vez de adivinar.
+Avisar apenas aparezca un caso de plantilla no reconocida para calibrar un
+patrón nuevo (como se hizo acá con la de CUIL/CUIT).
+
+El domicilio (solo plantilla Monotributo) viene en una sola línea "Calle
+Número" (ej. "SANTIAGO DEL ESTERO 157"); se separa por el último token si
+es numérico o "S/N", igual que la SOLICITUD separa Calle/Número. Si el
+domicilio es de barrio (sin calle+altura, ej. "B° SAN CAYETANO MZA 5 CASA
+10") la separación puede quedar mal dividida -- no se pidió un campo
+"Barrio" aparte, así que ese caso queda solo como una Calle mal cortada, no
+se pierde el dato.
 
 Uso:
     python3 extract_aval.py "../pdfs-prueba/AVAL PAZ, AGUSTIN.pdf"
+    python3 extract_aval.py "../pdfs-prueba/CONSTANCIA_CUIL.pdf"
 """
 
 import json
@@ -47,13 +66,11 @@ def _split_calle_numero(domicilio):
     return _clean(texto), None
 
 
-def extract_aval(pdf_path):
-    pages = load_lines(pdf_path)
-    page0 = pages[0]
-
-    campos = {
+def _campos_vacios():
+    return {
         "AVAL - CUIT": None,
         "AVAL - Nombre y Apellido / Razón Social": None,
+        "AVAL - Documento N°": None,
         "AVAL - Calle": None,
         "AVAL - Número": None,
         "AVAL - Localidad": None,
@@ -67,6 +84,22 @@ def extract_aval(pdf_path):
         "AVAL - Vigencia": None,
     }
 
+
+def _detectar_plantilla(page0):
+    """Detecta la plantilla por el TÍTULO del documento (primera línea) --
+    no por buscar "CUIT" en cualquier parte del PDF, que es lo que causó el
+    hallazgo real del 2026-08-11 (ver docstring del módulo)."""
+    if not page0:
+        return None
+    primera = (page0[0]["text"] or "").upper()
+    if "CONSTANCIA DE OPCI" in primera:
+        return "monotributo"
+    if "CONSTANCIA DE CUIL" in primera or "CONSTANCIA DE CUIT" in primera:
+        return "cuil_cuit"
+    return None
+
+
+def _extraer_monotributo(page0, campos):
     # --- CUIT + las 4 líneas siguientes: Nombre, Domicilio, Localidad, CP-Provincia
     # (orden fijo en la plantilla de ARCA)
     idx = find_line(page0, ["CUIT:"])
@@ -122,6 +155,39 @@ def extract_aval(pdf_path):
         )
         if m:
             campos["AVAL - Vigencia"] = f"{m.group(1)} a {m.group(2)}"
+
+
+def _extraer_cuil_cuit(page0, campos):
+    # --- Titular / Documento / CUIL-CUIT: 3 bloques de "etiqueta en una
+    # línea, valor en la siguiente", en ese orden fijo (constancia ANSES).
+    idx_titular = find_line(page0, ["Titular"])
+    if idx_titular is not None and idx_titular + 1 < len(page0):
+        campos["AVAL - Nombre y Apellido / Razón Social"] = _clean(page0[idx_titular + 1]["text"])
+
+    idx_doc = find_line(page0, ["Documento"], start=(idx_titular or 0) + 1)
+    if idx_doc is not None and idx_doc + 1 < len(page0):
+        m = re.search(r"(\d[\d.]*\d|\d)", page0[idx_doc + 1]["text"])
+        if m:
+            campos["AVAL - Documento N°"] = m.group(1).replace(".", "")
+
+    idx_cuil = find_line(page0, ["CUIL/CUIT"], start=(idx_doc or 0) + 1)
+    if idx_cuil is not None and idx_cuil + 1 < len(page0):
+        campos["AVAL - CUIT"] = _clean(page0[idx_cuil + 1]["text"])
+
+
+def extract_aval(pdf_path):
+    pages = load_lines(pdf_path)
+    page0 = pages[0]
+    campos = _campos_vacios()
+
+    plantilla = _detectar_plantilla(page0)
+    if plantilla == "monotributo":
+        _extraer_monotributo(page0, campos)
+    elif plantilla == "cuil_cuit":
+        _extraer_cuil_cuit(page0, campos)
+    # Si no matchea ninguna plantilla conocida, se devuelven todos los
+    # campos en None -- mejor eso que extraer texto de las líneas
+    # equivocadas (ver hallazgo real en el docstring del módulo).
 
     return campos
 

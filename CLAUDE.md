@@ -37,6 +37,15 @@ en el Drive, y reglas de negocio importantes (ej. PEP, Sujeto Obligado UIF).
      infiere de la marca de agua de DocuSign).
   2. Extractor simple de DNI/AVAL (nombre, DNI, fecha de nacimiento) — ya armado en
      /extractor/extract_dni.py y /extractor/extract_aval.py.
+     El AVAL no es una plantilla única -- extract_aval.py reconoce 2 (ARCA
+     Monotributo y ANSES CUIL/CUIT, calibradas cada una contra un ejemplo
+     real en /pdfs-prueba) detectando el TÍTULO del documento antes de
+     extraer nada. Si no reconoce la plantilla devuelve todos los campos en
+     None -- FIX (2026-08-11) de un hallazgo real: un AVAL con una TERCERA
+     plantilla no reconocida (otra Constancia de ARCA) generó errores falsos
+     en el informe porque la versión vieja buscaba "CUIT:" en cualquier
+     parte del PDF y agarraba texto de una tabla de impuestos no relacionada.
+     Avisar apenas aparezca una plantilla nueva para calibrarla.
   3. DONE: Motor de reglas de completitud (extractor/check_completitud.py) — cubre
      todos los bloques (0 a 14), con chequeo por fila de Beneficiarios y filtrado por
      familia Options/Invest Future donde corresponde.
