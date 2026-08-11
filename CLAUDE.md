@@ -76,12 +76,24 @@ en el Drive, y reglas de negocio importantes (ej. PEP, Sujeto Obligado UIF).
      Options-AECLIF-1354029, Tercero Pagador Persona Jurídica) es una póliza
      OPTIONS — así que el chequeo de Tercero Pagador se armó para aplicar a AMBAS
      familias, no solo Invest Future.
-     Sigue pendiente (necesita más cambios de infraestructura, no solo reglas de
-     negocio): "Clasificar Archivos" solo toma 1 DNI y 1 AVAL por carpeta (no
-     distingue de quién es cada uno), así que en escenarios con Tercero Pagador o
-     Tomador ≠ Vida Asegurada el sistema sabe QUÉ documentos hacen falta pero no
-     puede confirmar que el archivo correcto (de la persona correcta) esté
-     efectivamente cargado.
+     DONE (2026-08-11): "Clasificar Archivos" ya no toma 1 solo DNI y 1 solo AVAL
+     por carpeta — junta TODOS los que matcheen por nombre de archivo (dnis[]/
+     avals[]). "Consolidar y Chequear" arma la lista de personas esperadas según la
+     Solicitud (Tomador, Solicitante Conjunto, Vida Asegurada 1/2, y Pagador si hay
+     Tercero Pagador Persona Física — fusionando roles que resultan ser la misma
+     persona, ej. Tomador === Vida Asegurada 1 con el mismo DNI cuenta como una
+     sola persona) y empareja cada DNI/AVAL extraído contra esa lista por N° de
+     documento (o, para el AVAL, el DNI que el CUIT individual trae incrustado:
+     TT-DDDDDDDD-V) con el nombre como respaldo. Reporta puntualmente de quién
+     falta el DNI/AVAL, y si sobró algún archivo que no se pudo asociar a nadie
+     (posible error de OCR/extracción o documento de una persona no declarada).
+     Las reglas de consistencia SOLICITUD vs DNI/AVAL (fecha de nacimiento, nombre,
+     N° de documento, CUIT, domicilio) ahora comparan específicamente contra el
+     DNI/AVAL emparejado con el Tomador, no "el primero que aparezca" — más preciso
+     incluso en el caso de una sola persona. Los socios del Anexo 1 (Tercero
+     Pagador Persona Jurídica) quedan FUERA de este emparejamiento por persona —
+     siguen como "verificar manualmente" (no se pidió, y son N personas variables
+     sin un tope declarado en la Solicitud).
   7. DONE: Reglas de negocio/compliance (PEP, Sujeto Obligado UIF por profesión) —
      mismo nodo. Profesiones y lógica exacta definidas por Bells Group (ver memoria
      `reglas_uif_pep_doc` en este proyecto).
