@@ -14,8 +14,14 @@ en el Drive, y reglas de negocio importantes (ej. PEP, Sujeto Obligado UIF).
   de "no encontrado" tiene 2 casos, ambos responden EN EL MISMO HILO del mail original
   (Gmail "Reply"): (a) sin link de Drive en el mail -- avisa que respondan adjuntando
   el link; (b) con link pero sin archivo de SOLICITUD en la carpeta -- avisa eso y
-  además si el DNI y el AVAL se encontraron o no en la carpeta (usa lo que
-  "Clasificar Archivos" ya identificó, aunque no haya SOLICITUD).
+  además muestra TODOS los campos extraídos del DNI y el AVAL si esos archivos SÍ
+  estaban en la carpeta (o "no se encontró el archivo" si no estaban). Para esto,
+  "Solicitud Encontrada" (el IF que decide informe completo vs. aviso) se movió a
+  DESPUÉS de la descarga+extracción (ya no antes) -- así el DNI/AVAL se descargan y
+  extraen aunque falte la SOLICITUD, y "Consolidar y Chequear" quedó defensivo ante
+  0 items de entrada (carpeta sin ningún documento reconocible). El archivo local del
+  workflow (n8n/Bells_Revision_Solicitud.json) está reconciliado 1:1 con el workflow
+  real en producción (2026-08-11) -- ya no hay divergencia entre ambos.
 - Lo que falta programar de verdad (hoy son placeholders con datos de prueba):
   1. DONE: Extractor real de la SOLICITUD por coordenadas (pdfplumber, agrupando por
      línea, SIN IA) — /extractor/extract_solicitud.py ya cubre TODOS los bloques del
