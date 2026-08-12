@@ -48,10 +48,31 @@ bloque de texto que tapa parcialmente una marca de agua de seguridad
 (holograma/retrato con textura de rayado) -- best effort, calidad muy
 variable según la foto. Domicilio se recupera en la mayoría de los DNI
 con MRZ calibrados (aislando el canal ROJO de la imagen para atenuar la
-marca de agua -- ver _extraer_domicilio_lugar_watermark), pero Lugar de
-Nacimiento sigue siendo el campo más frágil (esa etiqueta específica cae
-justo sobre la parte más densa de la marca de agua en varios ejemplos
-reales) -- si no se encuentra queda en None, no se inventa ni se calcula.
+marca de agua -- ver _extraer_domicilio_lugar_watermark). Si no se
+encuentra nada, queda en None -- no se inventa ni se calcula.
+
+Lugar de nacimiento (2026-08-12, pedido explícito de Bells Group de
+mejorarlo de fondo): sigue siendo el campo más frágil -- esa etiqueta
+específica cae justo sobre la parte más densa de la marca de agua en
+varios ejemplos reales, y ni ampliando la grilla de thresholds probados
+se logra un texto limpio en todos los casos. Mejora real agregada: como
+"Lugar de nacimiento" casi siempre ES (o termina en) el nombre de una
+provincia argentina, el fragmento leído se compara contra esa lista
+chica y cerrada (ver _provincia_mas_cercana) -- si matchea con
+similitud >=0.55 Y el fragmento tiene 5+ letras reales (ese mínimo
+evita que un fragmento corto tipo "S SA A" matchee CUALQUIER provincia
+por pura casualidad, con una similitud casi igual a la de un match
+real), se usa el nombre completo de la provincia en vez del fragmento
+cortado (ej. "AIRES" -> "BUENOS AIRES", "CEE UMAN" -> "TUCUMAN"). Sin
+match de provincia, se exige un mínimo de letras más alto que antes (8,
+no 3) para el resto de los casos (ciudades, no solo provincias) -- evita
+aceptar ruido de OCR que por casualidad tiene pocos símbolos. Con esto
+el campo se recupera en ~7 de 15 DNI reales calibrados (antes ~1 de 6, y
+a veces con datos incorrectos que ahora se descartan en vez de
+mostrarse) -- sigue sin ser 100%, hay casos (ej. pdfs-prueba/DNI MIGNONE
+LUCIANO.pdf, valor real confirmado "SALTA") donde NINGUNA combinación de
+threshold/recorte probada da un texto lo bastante limpio como para
+reconocerlo con confianza, ni con el respaldo de la lista de provincias.
 
 Uso:
     python3 extract_dni.py "../pdfs-prueba/DNI PAZ, AGUSTIN.pdf"
@@ -306,6 +327,42 @@ def _extraer_domicilio_lugar_cuil(lineas_variantes):
     return domicilio, lugar_nacimiento, cuil
 
 
+_PROVINCIAS_ARG = [
+    "BUENOS AIRES", "CATAMARCA", "CHACO", "CHUBUT", "CORDOBA", "CORRIENTES",
+    "ENTRE RIOS", "FORMOSA", "JUJUY", "LA PAMPA", "LA RIOJA", "MENDOZA",
+    "MISIONES", "NEUQUEN", "RIO NEGRO", "SALTA", "SAN JUAN", "SAN LUIS",
+    "SANTA CRUZ", "SANTA FE", "SANTIAGO DEL ESTERO", "TIERRA DEL FUEGO",
+    "TUCUMAN", "CIUDAD AUTONOMA DE BUENOS AIRES",
+]
+
+
+def _provincia_mas_cercana(texto):
+    """"Lugar de nacimiento" casi siempre es (o termina en) el nombre de
+    una provincia argentina -- comparar contra esa lista chica y cerrada
+    da una señal mucho más fuerte que "¿tiene pocos símbolos?" para
+    distinguir un fragmento real (ej. "AIRES", recorte de "BUENOS AIRES")
+    de ruido de OCR que por casualidad quedó con pocas letras (ej. "PER",
+    "AR BUT A") -- ambos pasarían un filtro que solo mira proporción de
+    letras/símbolos. No es inventar el dato: solo se USA si ya hay un
+    fragmento leído con la forma de un nombre de provincia."""
+    import difflib
+
+    texto_norm = _normalizar(texto or "").strip()
+    if not texto_norm:
+        return None
+    # Un candidato muy corto (pocas letras reales, sin contar espacios)
+    # puede dar una razón de similitud alta contra CUALQUIER provincia por
+    # pura casualidad -- ej. "S SA A" (4 letras) da 0.57 contra "SAN JUAN",
+    # muy cerca del 0.59 de un match real como "AIRES" contra "BUENOS
+    # AIRES" -- no hay forma de separarlos solo por la razón. Exigir un
+    # mínimo de letras reduce ese ruido sin perder los matches reales
+    # (todos los confirmados hasta ahora tienen 5+ letras).
+    if len(re.sub(r"[^A-Z]", "", texto_norm)) < 5:
+        return None
+    match = difflib.get_close_matches(texto_norm, _PROVINCIAS_ARG, n=1, cutoff=0.55)
+    return match[0] if match else None
+
+
 def _calidad_texto(s, min_letras):
     """Puntaje de qué tan "limpio" parece un texto de OCR -- se usa para
     elegir, entre varias pasadas de OCR con distinto preprocesado, cuál
@@ -356,7 +413,7 @@ def _extraer_domicilio_lugar_watermark(im1):
         rojo_autoc = ImageOps.autocontrast(canal_rojo)
         ampliada = rojo_autoc.resize((rojo_autoc.width * 2, rojo_autoc.height * 2))
 
-        for umbral in (None, 90, 100, 110):
+        for umbral in (None, 85, 90, 95, 100, 105, 110):
             imagen_final = ampliada if umbral is None else ampliada.point(
                 lambda p, umbral=umbral: 255 if p > umbral else 0
             )
@@ -413,9 +470,26 @@ def _extraer_domicilio_lugar_watermark(im1):
                 # _calidad_texto (por proporción, no por posición).
                 lugar_nacimiento = resto or None
                 break
-            calidad_lugar = _calidad_texto(lugar_nacimiento, min_letras=3)
+
+            # Si el fragmento leído matchea (con tolerancia) el nombre de
+            # una provincia argentina, esa es una señal mucho más fuerte
+            # que la calidad genérica -- se usa el nombre completo de la
+            # provincia (no el fragmento leído, que puede venir cortado,
+            # ej. "AIRES" -> "BUENOS AIRES") y un puntaje alto para que
+            # gane sobre un resultado sin ese respaldo.
+            provincia = _provincia_mas_cercana(lugar_nacimiento)
+            if provincia:
+                calidad_lugar = 50 + len(provincia)
+                candidato_lugar = provincia
+            else:
+                # Sin match de provincia: exigir más letras que antes (6,
+                # no 3) -- un fragmento corto de puro ruido (ej. "PER",
+                # "AR BUT A") pasaba el filtro viejo con la misma
+                # facilidad que un fragmento real.
+                calidad_lugar = _calidad_texto(lugar_nacimiento, min_letras=8)
+                candidato_lugar = lugar_nacimiento
             if calidad_lugar > mejor_lugar["calidad"]:
-                mejor_lugar = {"valor": lugar_nacimiento, "calidad": calidad_lugar}
+                mejor_lugar = {"valor": candidato_lugar, "calidad": calidad_lugar}
 
         # Corte anticipado: si ya salió algo razonablemente limpio para
         # los 2 campos, no vale la pena seguir probando más variantes.
