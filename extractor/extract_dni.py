@@ -3,42 +3,55 @@ Extractor real del DNI (frente + dorso), con OCR (Tesseract vía pytesseract),
 SIN IA de interpretación -- el OCR solo convierte píxeles en texto, después
 se lee por posición/etiqueta igual que en extract_solicitud.py / extract_aval.py.
 
-ESTADO (2026-08-11): calibrado contra 4 DNI reales, no solo 1 -- el primer
-ejemplo (pdfs-prueba/DNI PAZ, AGUSTIN.pdf) es una foto de buena calidad y
-funcionaba perfecto, pero contra 3 DNI reales más (pdfs-prueba/05. DNI
-BUSQUIN OSCAR ALBERTO 1.pdf, DNI MARIA MERCEDES FALU.pdf, DNI DE
-MONASTERIO.pdf) el extractor viejo fallaba casi todos los campos -- no por
-un bug de lógica, sino porque esas fotos/escaneos son de resolución/calidad
-bastante más baja y el OCR crudo no las leía bien. Dos cambios de fondo:
+ESTADO (2026-08-12): calibrado contra 13 DNI reales de varios formatos y
+calidades (no solo fotos prolijas) -- pdfs-prueba/ tiene el detalle
+completo. Cambios de fondo, en orden de cuándo se agregaron:
 
 1. PREPROCESADO de imagen antes del OCR de las etiquetas impresas (upscale
    2x + escala de grises + autocontraste + nitidez) -- mejora mucho la
-   lectura en fotos borrosas/de baja resolución. Confirmado con los 4
-   ejemplos reales.
-2. El MRZ (las 3 líneas de código de máquina en la parte de abajo del
-   dorso, formato ICAO 9303 TD1) se lee MUCHO más limpio que el texto
-   impreso en TODOS los ejemplos que sí lo tienen -- es una fuente más
-   confiable para Documento/Fecha de nacimiento/Apellido/Nombre que las
-   etiquetas bilingües del frente, así que se usa como fuente PRIMARIA
-   (con el crop especial del frente y las etiquetas impresas como
-   respaldo). OJO: el MRZ mejora si se lee a resolución nativa, SIN el
-   preprocesado de arriba -- el upscale+nitidez rompe el tipo de letra
-   angosto del MRZ en vez de ayudarlo. Por eso son dos pasadas de OCR
-   distintas, no una sola.
+   lectura en fotos borrosas/de baja resolución.
+2. El MRZ (las 3 líneas de código de máquina, formato ICAO 9303 TD1) se
+   lee MUCHO más limpio que el texto impreso en la mayoría de los
+   ejemplos que sí lo tienen -- es la fuente PRIMARIA para Documento/
+   Fecha de nacimiento/Apellido/Nombre (con el crop especial del frente y
+   las etiquetas impresas como respaldo). El MRZ mejora si se lee a
+   resolución nativa, SIN el preprocesado de arriba -- el upscale+nitidez
+   rompe el tipo de letra angosto del MRZ en vez de ayudarlo. Por eso son
+   pasadas de OCR distintas, no una sola.
+3. El MRZ normalmente está en el DORSO, pero algunos formatos viejos
+   ("tarjeta" primera generación, ~2011) lo traen en el FRENTE en vez del
+   dorso (el dorso de esos tiene código de barras 2D en lugar de MRZ) --
+   se prueban ambas páginas, completando solo los campos que falten (no
+   se pisa lo que ya se encontró). También se prueba el dorso con
+   "--psm 6" si el modo automático no encuentra nada -- en dorsos muy
+   cargados de gráficos (foto + holograma + huella + código de barras) el
+   PSM automático a veces IGNORA el bloque de MRZ directamente, ni
+   siquiera lo lee mal.
+4. Fecha de nacimiento: se cruza SIEMPRE contra la etiqueta impresa del
+   frente ("Fecha de nacimiento / Date of birth", formato RENAPER
+   ~2021+), incluso cuando el MRZ ya trajo un valor -- un solo dígito mal
+   leído del MRZ da una fecha con formato válido pero incorrecta (ej. año
+   "26" en vez de "96" en un ejemplo real), y no hay forma de detectarlo
+   mirando solo el MRZ. Si hay desacuerdo, gana la etiqueta impresa. Una
+   fecha resultante POSTERIOR a hoy se descarta directamente (nadie firma
+   un DNI antes de nacer) -- red de seguridad mínima, no filtra todos los
+   casos (una fecha errónea pero no futura puede colarse igual si ni el
+   MRZ ni la etiqueta la corrigen).
 
-DNI DE MONASTERIO.pdf es además un formato VIEJO ("libreta" rectangular,
-sin bordes redondeados) que ni siquiera tiene MRZ -- ahí no queda otra que
-las etiquetas impresas ("APELLIDO/S" en mayúsculas fijas, no bilingüe
-"Apellido / Surname" como el formato nuevo). El matching de etiquetas ahora
-es insensible a mayúsculas/acentos para cubrir ambos formatos con el mismo
-código.
+El formato "libreta" viejo (rectangular, sin bordes redondeados, sin MRZ
+en ninguna página) sigue sin extraer Apellido/Nombre/Documento de forma
+confiable -- solo se pudo calibrar 1 ejemplo real de este formato
+específico.
 
-CAMPOS NUEVOS (Domicilio, Lugar de nacimiento, CUIL) salen del DORSO, en el
-mismo bloque de texto que tapa parcialmente el patrón de seguridad -- best
-effort, calidad variable según la foto (confirmado: en 2 de los 4 ejemplos
-reales el CUIL se lee bien, en los otros 2 no aparece nítido con ninguna
-combinación de OCR probada). Si no se encuentra, queda en None -- no se
-inventa ni se calcula.
+CAMPOS Domicilio/Lugar de nacimiento/CUIL salen del DORSO, en el mismo
+bloque de texto que tapa parcialmente una marca de agua de seguridad
+(holograma/retrato con textura de rayado) -- best effort, calidad muy
+variable según la foto. Domicilio se recupera en la mayoría de los DNI
+con MRZ calibrados (aislando el canal ROJO de la imagen para atenuar la
+marca de agua -- ver _extraer_domicilio_lugar_watermark), pero Lugar de
+Nacimiento sigue siendo el campo más frágil (esa etiqueta específica cae
+justo sobre la parte más densa de la marca de agua en varios ejemplos
+reales) -- si no se encuentra queda en None, no se inventa ni se calcula.
 
 Uso:
     python3 extract_dni.py "../pdfs-prueba/DNI PAZ, AGUSTIN.pdf"
@@ -198,8 +211,21 @@ def _parsear_mrz(texto):
         yy, mm, dd = int(m_fecha.group(1)), int(m_fecha.group(2)), int(m_fecha.group(3))
         if 1 <= mm <= 12 and 1 <= dd <= 31:
             anio = _anio_completo(yy)
-            mes_abrev = MESES_NUM_A_ABREV[mm]
-            resultado["fecha_nacimiento"] = f"{dd:02d} {mes_abrev} {anio}"
+            # Una fecha de nacimiento futura es imposible -- si el cálculo
+            # de siglo (o un dígito mal leído del MRZ) da una fecha
+            # posterior a hoy, mejor no devolver nada que devolver un dato
+            # con sentido (ej. "nacido en 2026" para un titular adulto,
+            # visto en un ejemplo real 2026-08-12: el MRZ traía un dígito
+            # OCR mal leído en el año de nacimiento).
+            import datetime
+
+            try:
+                fecha_calculada = datetime.date(anio, mm, dd)
+            except ValueError:
+                fecha_calculada = None
+            if fecha_calculada and fecha_calculada <= datetime.date.today():
+                mes_abrev = MESES_NUM_A_ABREV[mm]
+                resultado["fecha_nacimiento"] = f"{dd:02d} {mes_abrev} {anio}"
 
     # Ojo: el patrón exige AL MENOS UNA letra real en cada grupo -- si se
     # permite "<" solo, matchea contra el relleno de "<<<<<..." de las
@@ -399,6 +425,32 @@ def _extraer_domicilio_lugar_watermark(im1):
     return mejor_domicilio["valor"], mejor_lugar["valor"]
 
 
+def _unir_lineas_mrz(texto):
+    """Antes de correr el regex de MRZ, pega a cada línea de MRZ (la que
+    tiene la tira de "<<<<") la línea anterior SI esa línea anterior es
+    corta y solo letras -- el OCR a veces corta la 3ra línea del MRZ
+    (apellido<<nombre) justo después del prefijo "DE"/"VAN"/etc. de un
+    apellido compuesto, dejándolo en su propio renglón separado por un
+    salto de línea que el regex de _parsear_mrz no cruza (ej. un DNI real
+    calibrado 2026-08-12 partió "DE<MONASTERIO<<DIEGO<JOSE<<<<<" en "DE" +
+    "<MONASTERIO<<DIEGO<JOSE<<<<<")."""
+    lineas = texto.split("\n")
+    resultado = []
+    for i, linea in enumerate(lineas):
+        limpia = linea.strip()
+        if "<<<<" in limpia:
+            # El MRZ real no tiene espacios -- un espacio suelto ahí es
+            # ruido de OCR (ej. "DE <MONASTERIO<<..." en vez de
+            # "DE<MONASTERIO<<...").
+            limpia = limpia.replace(" ", "")
+            if i > 0:
+                anterior = lineas[i - 1].strip()
+                if anterior and len(anterior) <= 6 and re.fullmatch(r"[A-Z]+", anterior):
+                    limpia = anterior + limpia
+        resultado.append(limpia)
+    return "\n".join(resultado)
+
+
 def extract_dni(pdf_path):
     campos = {
         "DNI - Apellido": None,
@@ -422,7 +474,46 @@ def extract_dni(pdf_path):
             page1 = pdf.pages[1]
             im1 = page1.to_image(resolution=RESOLUTION).original
             texto_mrz = pytesseract.image_to_string(im1, lang="spa")
-            mrz = _parsear_mrz(texto_mrz)
+            mrz = _parsear_mrz(_unir_lineas_mrz(texto_mrz))
+            # El PSM automático (default) a veces directamente IGNORA el
+            # bloque de MRZ en dorsos muy cargados de gráficos (foto +
+            # holograma + huella + código de barras 2D, ver ejemplo real
+            # calibrado 2026-08-12) -- ni siquiera lo intenta leer, no es
+            # que lo lea mal. "--psm 6" (asume un solo bloque de texto
+            # uniforme) sí lo encuentra en ese caso.
+            if not all(mrz.values()):
+                texto_mrz_psm6 = pytesseract.image_to_string(im1, lang="spa", config="--psm 6")
+                mrz_psm6 = _parsear_mrz(_unir_lineas_mrz(texto_mrz_psm6))
+                for campo, valor in mrz_psm6.items():
+                    if not mrz[campo] and valor:
+                        mrz[campo] = valor
+
+        # Algunos DNI viejos (formato "tarjeta" de primera generación, sin
+        # MRZ en el dorso -- llevan código de barras 2D en su lugar, ver
+        # docstring del módulo) tienen el MRZ impreso en el FRENTE, debajo
+        # de la foto, en vez del dorso. Si el dorso no lo trajo completo,
+        # probar también el frente (con y sin preprocesado) y completar
+        # SOLO lo que siga faltando -- no pisar lo que ya se encontró.
+        if not all(mrz.values()):
+            # Preprocesada primero -- en el ejemplo real calibrado da
+            # apellido/nombre mucho más limpios que la pasada cruda (que
+            # sí puede ganarle en Documento N°, por eso se prueban las 2 y
+            # no se corta apenas la primera encuentra algo).
+            for candidato_im in (_preprocesar(im0), im0):
+                texto_mrz_frente = pytesseract.image_to_string(candidato_im, lang="spa")
+                mrz_frente = _parsear_mrz(_unir_lineas_mrz(texto_mrz_frente))
+                for campo, valor in mrz_frente.items():
+                    if not valor:
+                        continue
+                    # apellido/nombre: no aceptar un match de 1-2 letras
+                    # (mejor no tener nada que un valor obviamente cortado
+                    # a la mitad por el OCR).
+                    if campo in ("apellido", "nombre") and len(valor) < 3:
+                        continue
+                    if not mrz[campo]:
+                        mrz[campo] = valor
+                if all(mrz.values()):
+                    break
 
         campos["DNI - Documento N°"] = mrz["documento"]
         campos["DNI - Fecha de nacimiento"] = mrz["fecha_nacimiento"]
@@ -441,7 +532,18 @@ def extract_dni(pdf_path):
             raw_num = pytesseract.image_to_string(recorte, lang="eng", config=cfg)
             campos["DNI - Documento N°"] = _limpiar_numero_documento(raw_num)
 
-        if not campos["DNI - Apellido"] or not campos["DNI - Nombre"] or not campos["DNI - Fecha de nacimiento"]:
+        necesita_respaldo_frente = (
+            not campos["DNI - Apellido"] or not campos["DNI - Nombre"] or not campos["DNI - Fecha de nacimiento"]
+        )
+        # Diseños nuevos de DNI (RENAPER, ~2021 en adelante) traen "Fecha
+        # de nacimiento" bien grande e impresa en limpio en el frente,
+        # SEPARADA de "Fecha de emisión"/"Fecha de vencimiento" -- vale la
+        # pena cruzarla contra el MRZ aunque el MRZ ya haya traído un
+        # valor, porque un solo dígito mal leído del MRZ (ej. año "26" en
+        # vez de "96", visto en un ejemplo real 2026-08-12) da una fecha
+        # con formato válido pero directamente incorrecta, y no hay forma
+        # de detectar ese error solo mirando el MRZ.
+        if necesita_respaldo_frente or campos["DNI - Fecha de nacimiento"]:
             lineas_frente = _lineas_ocr(im0)
             lineas_frente_preprocesado = _lineas_ocr(_preprocesar(im0), psm=6)
 
@@ -461,16 +563,22 @@ def extract_dni(pdf_path):
                     fuente = lineas_frente_preprocesado
                 campos["DNI - Nombre"] = _solo_letras(_value_line(fuente, idx))
 
-            if not campos["DNI - Fecha de nacimiento"]:
-                idx = _find_caption(lineas_frente, "Fecha", "nacimiento")
-                val = _value_line(lineas_frente, idx)
-                if val:
-                    tokens = val.split()
-                    if len(tokens) >= 4:
-                        dia, mes, _mes_en, anio = tokens[0], tokens[1], tokens[2], tokens[-1]
-                        mes = re.sub(r"[^A-Z]", "", mes)
-                        if dia.isdigit() and anio.isdigit() and mes:
-                            campos["DNI - Fecha de nacimiento"] = f"{dia} {mes} {anio}"
+            idx = _find_caption(lineas_frente, "Fecha", "nacimiento")
+            val = _value_line(lineas_frente, idx)
+            fecha_frente = None
+            if val:
+                tokens = val.split()
+                if len(tokens) >= 4:
+                    dia, mes, _mes_en, anio = tokens[0], tokens[1], tokens[2], tokens[-1]
+                    mes = re.sub(r"[^A-Z]", "", mes)
+                    if dia.isdigit() and anio.isdigit() and mes:
+                        fecha_frente = f"{dia} {mes} {anio}"
+            if fecha_frente and fecha_frente != campos["DNI - Fecha de nacimiento"]:
+                # Cuando hay desacuerdo entre MRZ y etiqueta impresa, se
+                # prioriza la etiqueta -- ver comentario de arriba.
+                campos["DNI - Fecha de nacimiento"] = fecha_frente
+            elif not campos["DNI - Fecha de nacimiento"]:
+                campos["DNI - Fecha de nacimiento"] = fecha_frente
 
         # --- Domicilio / Lugar de nacimiento / CUIL: solo están en el
         # dorso, best effort (ver docstring del módulo). ---

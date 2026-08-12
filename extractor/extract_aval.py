@@ -2,8 +2,10 @@
 Extractor real del AVAL, por coordenadas (pdfplumber), SIN IA.
 
 ESTADO ACTUAL: el AVAL no es un único formato -- son constancias de
-ARCA/AFIP/ANSES (no una carta de garantía personal), y hay más de una
-plantilla válida. Reconoce 4 hoy:
+ARCA/AFIP/ANSES, pero TAMBIÉN pueden ser facturas de servicios (luz/gas/
+teléfono) o resúmenes de tarjeta de crédito (Bells Group aclaró
+2026-08-12: cualquiera de estos sirve como "aval de domicilio"). Reconoce
+8 plantillas hoy:
 
 1. "Monotributo" (pdfs-prueba/AVAL PAZ, AGUSTIN.pdf) -- Constancia de
    Opción al Régimen Simplificado de ARCA. Trae CUIT, nombre, domicilio
@@ -49,6 +51,34 @@ primera -- ver arriba) antes de extraer nada -- si no matchea ninguna
 plantilla conocida, devuelve todos los campos en None en vez de adivinar.
 Avisar apenas aparezca un caso de plantilla no reconocida para calibrar un
 patrón nuevo.
+
+5-8. Facturas de servicios (EDESA -electricidad-, GASNOR -gas-, Movistar
+   -telefonía-) y resúmenes de tarjeta VISA (agregados 2026-08-12,
+   calibrados contra pdfs-prueba/SERVICIO - * .pdf y RESUMEN - * .pdf) --
+   a diferencia de las constancias de ARCA/ANSES, estas son facturas con
+   layout de varias columnas, sin un campo por línea prolijo: la
+   extracción usa regex sobre el texto completo de la página en vez de
+   leer "N líneas después de la etiqueta". Traen Nombre + Domicilio (y
+   Localidad/CP/Provincia cuando se pudo ubicar, best-effort -- EDESA no
+   los trae en un formato reconocible en el único ejemplo disponible).
+   NINGUNA trae CUIT/CUIL del titular -- el "CUIT"/"C.U.I.T." que
+   aparece en estas facturas es el de la EMPRESA emisora (GASNOR,
+   Telefónica, o el banco emisor de la VISA), no el del titular del
+   servicio, así que ese campo queda en None a propósito (no es un dato
+   faltante, es un dato que no corresponde). Movistar sí trae el
+   Documento (DNI) del titular, se guarda en "AVAL - Documento N°" igual
+   que en la plantilla CUIL/CUIT de ANSES. Detectadas por palabra clave
+   de la empresa/"TITULAR DE CUENTA" en las primeras ~20 líneas (no toda
+   la página) -- un resumen de tarjeta puede tener un pago A EDESA/GASNOR
+   como una transacción más del listado, y buscar en toda la página
+   detectaba erróneamente ESE resumen como si fuera una factura de EDESA
+   (hallazgo real 2026-08-12, devolvía todos los campos vacíos porque la
+   estructura no coincidía). LÍMITE CONOCIDO: pdfs-prueba/SERVICIO -
+   GASNOR.pdf es una foto/escaneo sin capa de texto (0 caracteres
+   extraíbles por pdfplumber) -- este módulo no hace OCR (a diferencia de
+   extract_dni.py), así que ese caso puntual devuelve todos los campos en
+   None. Si llegan muchos AVAL de este tipo como imagen, evaluar agregar
+   OCR acá también.
 
 El domicilio (Monotributo y las 2 plantillas de ARCA) viene en una línea
 "Calle Número" (ej. "SANTIAGO DEL ESTERO 157"), a veces con un sufijo
@@ -136,6 +166,28 @@ def _detectar_plantilla(page0):
         return "arca"
     if "CONSTANCIA DE INSCRIPCI" in encabezado:
         return "arca"
+
+    # Facturas de servicios / resúmenes de tarjeta (agregados 2026-08-12,
+    # sirven como AVAL de domicilio aunque no sean constancias de ARCA) --
+    # estas no tienen un título limpio en la parte de arriba (son facturas
+    # con layout de varias columnas), así que se detectan por una palabra
+    # clave de la empresa. Se busca solo en las primeras ~20 líneas (zona
+    # de encabezado/datos del titular), NO en toda la página -- un
+    # resumen de tarjeta puede tener un pago A EDESA/GASNOR/etc. como una
+    # transacción más en el listado (hallazgo real: un resumen VISA con
+    # "EDESA SA" como transacción se detectaba como factura de EDESA y
+    # devolvía todos los campos vacíos). "TITULAR DE CUENTA" se chequea
+    # primero porque es la firma más específica de las 4 -- si matchea,
+    # no hace falta mirar las demás.
+    encabezado_amplio = " | ".join((l["text"] or "") for l in page0[:20]).upper()
+    if "TITULAR DE CUENTA" in encabezado_amplio:
+        return "visa_resumen"
+    if "EDESA" in encabezado_amplio:
+        return "edesa"
+    if "GASNOR" in encabezado_amplio:
+        return "gasnor"
+    if "TELEF" in encabezado_amplio:
+        return "movistar"
     return None
 
 
@@ -236,6 +288,126 @@ def _extraer_arca(page0, campos):
             campos["AVAL - Vigencia"] = f"{m.group(1)} a {m.group(2)}"
 
 
+def _extraer_gasnor(page0, campos):
+    """Factura de servicio de gas (GASNOR) -- layout de varias columnas,
+    no de un campo por línea como las constancias de ARCA. Se busca cada
+    etiqueta con regex sobre el texto completo en vez de por posición."""
+    texto = "\n".join(l["text"] for l in page0)
+
+    m = re.search(r"Sr\.?/a:\s*(.+)", texto)
+    if m:
+        campos["AVAL - Nombre y Apellido / Razón Social"] = _clean(m.group(1))
+
+    m = re.search(r"Domicilio Servicio:\s*(.+?)(?:\s+Subtotal|\n|$)", texto)
+    if m:
+        calle, numero = _split_calle_numero(m.group(1))
+        campos["AVAL - Calle"] = calle
+        campos["AVAL - Número"] = numero
+
+    m = re.search(r"Localidad:\s*(\S+)", texto)
+    if m:
+        campos["AVAL - Localidad"] = _clean(m.group(1))
+
+    m = re.search(r"Provincia:\s*(\S+)\s+CP:\s*(\d+)", texto)
+    if m:
+        campos["AVAL - Provincia"] = _clean(m.group(1))
+        campos["AVAL - Código Postal"] = m.group(2)
+
+
+def _extraer_edesa(page0, campos):
+    """Factura de servicio eléctrico (EDESA) -- mismo criterio que GASNOR
+    (regex sobre texto completo, no por posición fija). El nombre no tiene
+    etiqueta propia -- es la primera línea con forma "APELLIDO, NOMBRE"
+    seguida de números de cuenta."""
+    texto = "\n".join(l["text"] for l in page0)
+
+    m = re.search(
+        r"^([A-ZÁÉÍÓÚÑ]+(?:\s[A-ZÁÉÍÓÚÑ]+)*,\s*[A-ZÁÉÍÓÚÑ]+(?:\s[A-ZÁÉÍÓÚÑ]+)*)\s+\d{5,}",
+        texto,
+        re.MULTILINE,
+    )
+    if m:
+        campos["AVAL - Nombre y Apellido / Razón Social"] = _clean(m.group(1))
+
+    m = re.search(r"Domicilio\s*:\s*(.+?)(?:\s+Subtotal|\n|$)", texto)
+    if m:
+        valor = m.group(1).strip()
+        # el domicilio suele seguir en la línea de abajo (ej. "ETAPA II")
+        # antes de "Subtotal ..." -- se pega si no es otro campo con ":"
+        fin = m.end()
+        resto = texto[fin:].split("\n", 2)
+        if resto and resto[0].strip() and ":" not in resto[0]:
+            # cortar también acá antes de "Subtotal" -- puede venir
+            # pegado en la MISMA línea que el resto del domicilio
+            # (ej. "ETAPA II Subtotal EDESA SA 6.892,73").
+            siguiente = re.split(r"\s+Subtotal\b", resto[0].strip(), maxsplit=1)[0]
+            if siguiente:
+                valor = f"{valor} {siguiente}"
+        calle, numero = _split_calle_numero(valor)
+        campos["AVAL - Calle"] = calle
+        campos["AVAL - Número"] = numero
+
+
+def _extraer_movistar(page0, campos):
+    """Factura de telefonía móvil (Movistar) -- mismo criterio que GASNOR/
+    EDESA. Trae el Documento (DNI) del titular, NO CUIT -- el "C.U.I.T"
+    que aparece en el encabezado es el de Telefónica Móviles Argentina
+    S.A. (la empresa), no del titular de la línea."""
+    texto = "\n".join(l["text"] for l in page0)
+
+    idx_cuit_empresa = find_line(page0, ["C.U.I.T"])
+    if idx_cuit_empresa is not None and idx_cuit_empresa + 1 < len(page0):
+        m = re.match(r"^(.+?)\s+Ingresos Brutos", page0[idx_cuit_empresa + 1]["text"])
+        if m:
+            campos["AVAL - Nombre y Apellido / Razón Social"] = _clean(m.group(1))
+
+    idx_domicilio = (idx_cuit_empresa or 0) + 3
+    if idx_domicilio < len(page0):
+        valor = re.sub(r"\s+(ORIGINAL|DUPLICADO)\s*$", "", page0[idx_domicilio]["text"], flags=re.IGNORECASE)
+        calle, numero = _split_calle_numero(valor)
+        campos["AVAL - Calle"] = calle
+        campos["AVAL - Número"] = numero
+
+    m = re.search(r"\(([A-Z]\d{4}[A-Z]{3})\)\s+([A-ZÁÉÍÓÚÑ]+)\s+Vencimiento", texto)
+    if m:
+        campos["AVAL - Código Postal"] = m.group(1)
+        campos["AVAL - Localidad"] = m.group(2)
+
+    m = re.search(r"Documento Nacional Identidad:\s*(\d+)", texto)
+    if m:
+        campos["AVAL - Documento N°"] = m.group(1)
+
+
+def _extraer_visa_resumen(page0, campos):
+    """Resumen de cuenta de tarjeta VISA -- mismo criterio de regex sobre
+    texto completo. El "CUIT" que trae el encabezado es del banco/emisor
+    de la tarjeta, NO del titular -- un resumen de tarjeta no muestra el
+    CUIT/CUIL personal del titular, así que ese campo queda en None acá a
+    propósito (no hay nada que extraer, no es un bug)."""
+    texto = "\n".join(l["text"] for l in page0)
+
+    m = re.search(r"^([A-ZÁÉÍÓÚÑ\s]+?)\s+CIERRE ACTUAL:", texto, re.MULTILINE)
+    if not m:
+        m = re.search(r"TITULAR DE CUENTA:\s*(.+)", texto)
+    if m:
+        campos["AVAL - Nombre y Apellido / Razón Social"] = _clean(m.group(1))
+
+    m = re.search(r"^(.+?)\s+VENCIMIENTO\s+SALDO", texto, re.MULTILINE)
+    if m:
+        calle, numero = _split_calle_numero(m.group(1))
+        campos["AVAL - Calle"] = calle
+        campos["AVAL - Número"] = numero
+
+    m = re.search(r"^(\d{4})\s+([A-ZÁÉÍÓÚÑ]+)\s", texto, re.MULTILINE)
+    if m:
+        campos["AVAL - Código Postal"] = m.group(1)
+        campos["AVAL - Localidad"] = m.group(2)
+
+    m = re.search(r"PROV\s+([A-ZÁÉÍÓÚÑ]+)\s+SUC", texto)
+    if m:
+        campos["AVAL - Provincia"] = m.group(1)
+
+
 def _extraer_cuil_cuit(page0, campos):
     # --- Titular / Documento / CUIL-CUIT: 3 bloques de "etiqueta en una
     # línea, valor en la siguiente", en ese orden fijo (constancia ANSES).
@@ -266,6 +438,14 @@ def extract_aval(pdf_path):
         _extraer_cuil_cuit(page0, campos)
     elif plantilla == "arca":
         _extraer_arca(page0, campos)
+    elif plantilla == "gasnor":
+        _extraer_gasnor(page0, campos)
+    elif plantilla == "edesa":
+        _extraer_edesa(page0, campos)
+    elif plantilla == "movistar":
+        _extraer_movistar(page0, campos)
+    elif plantilla == "visa_resumen":
+        _extraer_visa_resumen(page0, campos)
     # Si no matchea ninguna plantilla conocida, se devuelven todos los
     # campos en None -- mejor eso que extraer texto de las líneas
     # equivocadas (ver hallazgo real en el docstring del módulo).
