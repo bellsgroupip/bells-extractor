@@ -280,6 +280,125 @@ def _extraer_domicilio_lugar_cuil(lineas_variantes):
     return domicilio, lugar_nacimiento, cuil
 
 
+def _calidad_texto(s, min_letras):
+    """Puntaje de qué tan "limpio" parece un texto de OCR -- se usa para
+    elegir, entre varias pasadas de OCR con distinto preprocesado, cuál
+    devolvió el mejor resultado (no hay ground truth en producción, así
+    que la única señal disponible es qué tan plausible es el texto en sí:
+    mayoría de letras, poco ruido de símbolos/dígitos sueltos, y no
+    empieza con puntuación -- eso evita aceptar basura tipo '457 - " | h n
+    q' o un fragmento cortado tipo '- DE: TUCUMAN' solo porque matcheó la
+    etiqueta en esa línea)."""
+    if not s:
+        return -1
+    if not s[0].isalnum():
+        return -1
+    letras = sum(1 for c in s if c.isalpha())
+    if letras < min_letras:
+        return -1
+    otros = sum(1 for c in s if not c.isalpha() and not c.isspace())
+    total = letras + otros
+    if total and (otros / total) > 0.25:
+        return -1
+    return letras - otros
+
+
+def _extraer_domicilio_lugar_watermark(im1):
+    """Extrae DOMICILIO / LUGAR DE NACIMIENTO del bloque superior-izquierdo
+    del dorso (formato nuevo, con MRZ) -- ese bloque está impreso ENCIMA de
+    una marca de agua de seguridad (retrato/holograma con textura de
+    rayado o manchas de color), que rompe el OCR de `_lineas_ocr` normal en
+    la mayoría de los DNI reales calibrados (2026-08-12): el texto es
+    legible a simple vista pero el ruido de fondo confunde a Tesseract.
+
+    Mitigación: aislar el canal ROJO de la imagen (el fondo suele ser
+    azul/celeste -- en el canal rojo queda mucho más claro que el texto
+    negro, que es oscuro en los 3 canales) y probar unas pocas
+    combinaciones de threshold/tamaño de recorte, quedándose con la de
+    mejor `_calidad_texto` para cada campo (domicilio y lugar de
+    nacimiento se evalúan por separado -- pueden salir mejor en pasadas
+    distintas). Sigue siendo best-effort: en fotos con la marca de agua
+    muy densa justo sobre el texto puede no recuperar nada limpio (ver
+    docstring del módulo)."""
+    w, h = im1.size
+    mejor_domicilio = {"valor": None, "calidad": -1}
+    mejor_lugar = {"valor": None, "calidad": -1}
+
+    for hfrac in (0.23, 0.30):
+        crop = im1.crop((0, int(h * 0.03), int(w * 0.82), int(h * hfrac)))
+        canal_rojo, _, _ = crop.split()
+        rojo_autoc = ImageOps.autocontrast(canal_rojo)
+        ampliada = rojo_autoc.resize((rojo_autoc.width * 2, rojo_autoc.height * 2))
+
+        for umbral in (None, 90, 100, 110):
+            imagen_final = ampliada if umbral is None else ampliada.point(
+                lambda p, umbral=umbral: 255 if p > umbral else 0
+            )
+            # image_to_string (no image_to_data/_lineas_ocr) a propósito acá:
+            # el algoritmo de reading-order propio de Tesseract separa las 3
+            # líneas del bloque bastante mejor que agrupar por coordenada
+            # "top" con tolerancia fija (que en este recorte, ampliado 2x,
+            # a veces mezcla el orden de las líneas) -- confirmado
+            # empíricamente contra los ejemplos reales calibrados.
+            texto = pytesseract.image_to_string(imagen_final, lang="spa", config="--psm 6")
+            lineas_texto = [l for l in texto.split("\n") if l.strip()]
+
+            domicilio = None
+            for i, linea in enumerate(lineas_texto):
+                if "DOMICIL" not in _normalizar(linea):
+                    continue
+                m = re.search(r"DOMICILI[A-Z]*[:\s]+(.+)", linea, re.IGNORECASE)
+                valor = m.group(1).strip(" -:.,") if m else None
+                if valor and i + 1 < len(lineas_texto):
+                    siguiente = lineas_texto[i + 1]
+                    if "NACIM" not in _normalizar(siguiente) and "LUGAR" not in _normalizar(siguiente):
+                        valor = f"{valor} {siguiente}".strip()
+                domicilio = valor or None
+                break
+            calidad_dom = _calidad_texto(domicilio, min_letras=10)
+            if calidad_dom > mejor_domicilio["calidad"]:
+                mejor_domicilio = {"valor": domicilio, "calidad": calidad_dom}
+
+            lugar_nacimiento = None
+            for linea in lineas_texto:
+                normalizada = _normalizar(linea)
+                if "LUGAR" not in normalizada:
+                    continue
+                # "NACIMIENTO" rara vez sobrevive completo al OCR sobre la
+                # marca de agua (ej. "NAQUIERIO", "NAGIENIS", "NABRRENTO")
+                # -- en vez de exigir el substring exacto "NACIM", alcanza
+                # con una palabra que empiece "NA" y tenga longitud
+                # parecida, para no perder el resto del renglón (el valor
+                # real) solo porque la etiqueta se leyó mal.
+                m_etiqueta = re.search(r"NA[A-Z]{4,}", normalizada)
+                if not m_etiqueta:
+                    continue
+                # _normalizar no cambia la longitud del texto (solo
+                # mayúsculas/acentos), así que el índice del match vale
+                # igual sobre la línea original.
+                resto = linea[m_etiqueta.end():].strip(" :-.,")
+                # Saca basura suelta de OCR pegada al final (símbolos que
+                # no son letra/dígito/espacio, ej. un "�" residual).
+                resto = re.sub(r"[^\w]+$", "", resto, flags=re.UNICODE)
+                # OJO: NO cortar en el primer dígito -- el OCR a veces
+                # confunde la PRIMERA letra del lugar con un dígito
+                # (ej. "SALTA" leído "0ALTA"), y cortar ahí perdía el
+                # valor entero. El filtro de ruido lo hace
+                # _calidad_texto (por proporción, no por posición).
+                lugar_nacimiento = resto or None
+                break
+            calidad_lugar = _calidad_texto(lugar_nacimiento, min_letras=3)
+            if calidad_lugar > mejor_lugar["calidad"]:
+                mejor_lugar = {"valor": lugar_nacimiento, "calidad": calidad_lugar}
+
+        # Corte anticipado: si ya salió algo razonablemente limpio para
+        # los 2 campos, no vale la pena seguir probando más variantes.
+        if mejor_domicilio["calidad"] >= 15 and mejor_lugar["calidad"] >= 3:
+            break
+
+    return mejor_domicilio["valor"], mejor_lugar["valor"]
+
+
 def extract_dni(pdf_path):
     campos = {
         "DNI - Apellido": None,
@@ -364,9 +483,18 @@ def extract_dni(pdf_path):
             domicilio, lugar_nac, cuil = _extraer_domicilio_lugar_cuil(
                 [lineas_dorso_preprocesado, lineas_dorso]
             )
-            campos["DNI - Domicilio"] = domicilio
-            campos["DNI - Lugar de nacimiento"] = lugar_nac
             campos["DNI - CUIL"] = cuil
+
+            # Domicilio/Lugar de nacimiento: la pasada de arriba casi nunca
+            # los encuentra en fotos con marca de agua encima del texto
+            # (formato nuevo, con MRZ) -- se prueba primero el aislamiento
+            # de canal rojo (ver docstring de la función), y si no
+            # encuentra nada se cae al resultado de la pasada de arriba
+            # (que sigue siendo mejor para el formato viejo "libreta", sin
+            # esa marca de agua).
+            domicilio_wm, lugar_wm = _extraer_domicilio_lugar_watermark(im1)
+            campos["DNI - Domicilio"] = domicilio_wm or domicilio
+            campos["DNI - Lugar de nacimiento"] = lugar_wm or lugar_nac
 
     return campos
 

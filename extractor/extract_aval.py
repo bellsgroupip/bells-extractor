@@ -3,7 +3,7 @@ Extractor real del AVAL, por coordenadas (pdfplumber), SIN IA.
 
 ESTADO ACTUAL: el AVAL no es un único formato -- son constancias de
 ARCA/AFIP/ANSES (no una carta de garantía personal), y hay más de una
-plantilla válida. Reconoce 2 hoy:
+plantilla válida. Reconoce 4 hoy:
 
 1. "Monotributo" (pdfs-prueba/AVAL PAZ, AGUSTIN.pdf) -- Constancia de
    Opción al Régimen Simplificado de ARCA. Trae CUIT, nombre, domicilio
@@ -11,37 +11,61 @@ plantilla válida. Reconoce 2 hoy:
    actividad y vigencia. NO trae DNI ni fecha de nacimiento -- el cruce
    contra la SOLICITUD se hace por CUIT/nombre/domicilio, no por fecha de
    nacimiento (a diferencia del DNI).
-2. "CUIL/CUIT" (pdfs-prueba/CONSTANCIA_CUIL.pdf) -- Constancia de CUIL/CUIT
-   de ANSES. Mucho más simple: Titular (nombre), Documento (DNI) y
-   CUIL/CUIT. NO trae domicilio -- los campos de domicilio/régimen quedan
-   en None para esta plantilla.
+2. "CUIL/CUIT" de ANSES (pdfs-prueba/CONSTANCIA_CUIL.pdf) -- título
+   literal "Constancia de CUIL/CUIT". Mucho más simple: Titular (nombre),
+   Documento (DNI) y CUIL/CUIT. NO trae domicilio ni vigencia -- el propio
+   PDF aclara "Esta constancia no tiene vencimiento" -- esos campos quedan
+   en None para esta plantilla, no es un bug ni un caso a mejorar.
+3 y 4. "Constancia de CUIL" y "Constancia de Inscripción" de ARCA
+   (pdfs-prueba/ARCA - CUIL SQUEO NATANAEL ALEXIS.pdf y AFIP - CONSTANCIA -
+   DAIVES.pdf / ARCA - AVAL - MIGNONE LUCIANO.pdf, agregados 2026-08-12) --
+   exportadas desde el navegador ("Formulario de Impresión de Constancia de
+   Inscripción" como primera línea, con fecha/hora -- el título real del
+   documento va en la línea siguiente, no en la primera). A diferencia de
+   la Constancia de CUIL/CUIT de ANSES, estas SÍ traen domicilio completo
+   (etiqueta "DOMICILIO LEGAL/REAL - ARCA" o "DOMICILIO FISCAL - ARCA",
+   aparece 2 veces en la de Inscripción -- se toma la primera aparición,
+   son el mismo domicilio) y vigencia de la constancia (mismo formato que
+   Monotributo). Nombre + CUIT/CUIL vienen juntos en una sola línea
+   ("<NOMBRE> CUIT: <valor>" o "<NOMBRE> CUIL: <valor>"). No traen
+   Régimen/Categoría/Actividad en el mismo formato que Monotributo (la de
+   Inscripción sí lista actividades, pero en un bloque de largo variable
+   según cuántos regímenes tenga el contribuyente registrados -- no vale la
+   pena parsearlo para lo que se pidió, queda en None). Se procesan las dos
+   con la misma función (_extraer_arca) porque comparten estructura
+   exacta de Nombre+CUIT / Domicilio / Vigencia.
 
 HALLAZGO REAL (2026-08-11, ejecución 247): un AVAL real (Zurich, cliente
-TUERO) resultó ser una TERCERA plantilla de ARCA no reconocida (parece una
-Constancia de Inscripción general, mencionaba "IMPUESTOS/REGÍMENES
-NACIONALES REGISTRADOS", "GANANCIAS PERSONAS FÍSICAS", "IVA"). La versión
-vieja de este script asumía SIEMPRE la plantilla Monotributo y buscaba
-"CUIT:" en cualquier parte del PDF -- como esa constancia también tiene esa
-cadena en otro contexto (una tabla de impuestos), el script agarró texto de
-las filas de esa tabla como si fueran Nombre/Calle/Localidad, generando
-errores falsos ("Nombre no coincide", "Domicilio no coincide") en el
-informe. FIX: ahora la plantilla se detecta por la PRIMERA LÍNEA del PDF
-(título del documento) antes de extraer nada -- si no matchea ninguna
+TUERO) resultó ser la plantilla "Constancia de Inscripción" de ARCA (la
+misma que se calibró recién, punto 4) todavía no reconocida en ese momento.
+La versión vieja de este script asumía SIEMPRE la plantilla Monotributo y
+buscaba "CUIT:" en cualquier parte del PDF -- como esa constancia también
+tiene esa cadena en otro contexto (una tabla de impuestos), el script
+agarró texto de las filas de esa tabla como si fueran Nombre/Calle/
+Localidad, generando errores falsos ("Nombre no coincide", "Domicilio no
+coincide") en el informe. FIX: la plantilla se detecta por el TÍTULO del
+documento (buscado en las primeras líneas, no asumiendo que sea la
+primera -- ver arriba) antes de extraer nada -- si no matchea ninguna
 plantilla conocida, devuelve todos los campos en None en vez de adivinar.
 Avisar apenas aparezca un caso de plantilla no reconocida para calibrar un
-patrón nuevo (como se hizo acá con la de CUIL/CUIT).
+patrón nuevo.
 
-El domicilio (solo plantilla Monotributo) viene en una sola línea "Calle
-Número" (ej. "SANTIAGO DEL ESTERO 157"); se separa por el último token si
-es numérico o "S/N", igual que la SOLICITUD separa Calle/Número. Si el
-domicilio es de barrio (sin calle+altura, ej. "B° SAN CAYETANO MZA 5 CASA
-10") la separación puede quedar mal dividida -- no se pidió un campo
-"Barrio" aparte, así que ese caso queda solo como una Calle mal cortada, no
-se pierde el dato.
+El domicilio (Monotributo y las 2 plantillas de ARCA) viene en una línea
+"Calle Número" (ej. "SANTIAGO DEL ESTERO 157"), a veces con un sufijo
+"- BARRIO : <nombre> [código]" (ej. "ESTANISLAO DEL CAMPO 1274 - BARRIO :
+SAN LORENZO 4401" -- el número de barrio al final NO es la altura, hay que
+cortar antes del "- BARRIO"); se separa por el token numérico (o "S/N")
+antes de "- BARRIO" si existe, o el último token si no. Si el domicilio es
+de barrio sin ese formato (ej. "B° SAN CAYETANO MZA 5 CASA 10") la
+separación puede quedar mal dividida -- no se pidió un campo "Barrio"
+aparte, así que ese caso queda solo como una Calle mal cortada, no se
+pierde el dato.
 
 Uso:
     python3 extract_aval.py "../pdfs-prueba/AVAL PAZ, AGUSTIN.pdf"
     python3 extract_aval.py "../pdfs-prueba/CONSTANCIA_CUIL.pdf"
+    python3 extract_aval.py "../pdfs-prueba/ARCA - CUIL SQUEO NATANAEL ALEXIS.pdf"
+    python3 extract_aval.py "../pdfs-prueba/AFIP - CONSTANCIA - DAIVES.pdf"
 """
 
 import json
@@ -60,6 +84,12 @@ def _split_calle_numero(domicilio):
     texto = (domicilio or "").strip()
     if not texto:
         return None, None
+    # "CALLE NUMERO - BARRIO : NOMBRE [código]" (formato ARCA) -- el
+    # número de la altura está ANTES de "- BARRIO", no al final de la
+    # línea (ver docstring del módulo).
+    m = re.match(r"^(.*\S)\s+(S/N|\d+[A-Za-z°]*)\s*-\s*BARRIO\s*:", texto, re.IGNORECASE)
+    if m:
+        return _clean(m.group(1)), _clean(m.group(2))
     m = re.match(r"^(.*\S)\s+(S/N|\d+[A-Za-z°]*)$", texto)
     if m:
         return _clean(m.group(1)), _clean(m.group(2))
@@ -86,16 +116,26 @@ def _campos_vacios():
 
 
 def _detectar_plantilla(page0):
-    """Detecta la plantilla por el TÍTULO del documento (primera línea) --
-    no por buscar "CUIT" en cualquier parte del PDF, que es lo que causó el
-    hallazgo real del 2026-08-11 (ver docstring del módulo)."""
+    """Detecta la plantilla por el TÍTULO del documento -- no por buscar
+    "CUIT" en cualquier parte del PDF, que es lo que causó el hallazgo real
+    del 2026-08-11 (ver docstring del módulo). Busca en las primeras
+    líneas (no solo la primera): las constancias de ARCA exportadas desde
+    el navegador traen una línea de encabezado con fecha/hora ANTES del
+    título real del documento."""
     if not page0:
         return None
-    primera = (page0[0]["text"] or "").upper()
-    if "CONSTANCIA DE OPCI" in primera:
+    encabezado = " | ".join((l["text"] or "") for l in page0[:5]).upper()
+    if "CONSTANCIA DE OPCI" in encabezado:
         return "monotributo"
-    if "CONSTANCIA DE CUIL" in primera or "CONSTANCIA DE CUIT" in primera:
+    # OJO: chequear "CUIL/CUIT" (con barra, ANSES) ANTES que "CONSTANCIA
+    # DE CUIL" sola (ARCA) -- son plantillas distintas, "CUIL/CUIT" está
+    # contenida como substring en cualquier frase que la incluya.
+    if "CUIL/CUIT" in encabezado:
         return "cuil_cuit"
+    if "CONSTANCIA DE CUIL" in encabezado or "CONSTANCIA DE CUIT" in encabezado:
+        return "arca"
+    if "CONSTANCIA DE INSCRIPCI" in encabezado:
+        return "arca"
     return None
 
 
@@ -157,6 +197,45 @@ def _extraer_monotributo(page0, campos):
             campos["AVAL - Vigencia"] = f"{m.group(1)} a {m.group(2)}"
 
 
+def _extraer_arca(page0, campos):
+    """Constancia de CUIL o de Inscripción de ARCA (ver docstring del
+    módulo) -- comparten estructura: Nombre + CUIT/CUIL en una sola línea,
+    domicilio de 3 líneas después de la primera etiqueta "DOMICILIO..."
+    (aparece 2 veces en la de Inscripción, se toma la primera), y vigencia
+    de la constancia en el mismo formato que Monotributo."""
+    idx_nombre = None
+    for i, linea in enumerate(page0):
+        m = re.search(r"^(.+?)\s+CUI[LT]:\s*([\d.-]+)", linea["text"])
+        if m:
+            idx_nombre = i
+            campos["AVAL - Nombre y Apellido / Razón Social"] = _clean(m.group(1))
+            campos["AVAL - CUIT"] = _clean(m.group(2))
+            break
+
+    idx_dom = find_line(page0, ["DOMICILIO"], start=(idx_nombre or 0) + 1)
+    if idx_dom is not None:
+        if idx_dom + 1 < len(page0):
+            calle, numero = _split_calle_numero(page0[idx_dom + 1]["text"])
+            campos["AVAL - Calle"] = calle
+            campos["AVAL - Número"] = numero
+        if idx_dom + 2 < len(page0):
+            campos["AVAL - Localidad"] = _clean(page0[idx_dom + 2]["text"])
+        if idx_dom + 3 < len(page0):
+            cp_prov = page0[idx_dom + 3]["text"]
+            m = re.match(r"(\d+)-(.+)", cp_prov)
+            if m:
+                campos["AVAL - Código Postal"] = m.group(1)
+                campos["AVAL - Provincia"] = _clean(m.group(2))
+
+    idx_vig = find_line(page0, ["Vigencia", "de", "la", "presente", "constancia:"])
+    if idx_vig is not None:
+        m = re.search(
+            r"constancia:\s*([\d-]+)\s+a\s+([\d-]+)", page0[idx_vig]["text"]
+        )
+        if m:
+            campos["AVAL - Vigencia"] = f"{m.group(1)} a {m.group(2)}"
+
+
 def _extraer_cuil_cuit(page0, campos):
     # --- Titular / Documento / CUIL-CUIT: 3 bloques de "etiqueta en una
     # línea, valor en la siguiente", en ese orden fijo (constancia ANSES).
@@ -185,6 +264,8 @@ def extract_aval(pdf_path):
         _extraer_monotributo(page0, campos)
     elif plantilla == "cuil_cuit":
         _extraer_cuil_cuit(page0, campos)
+    elif plantilla == "arca":
+        _extraer_arca(page0, campos)
     # Si no matchea ninguna plantilla conocida, se devuelven todos los
     # campos en None -- mejor eso que extraer texto de las líneas
     # equivocadas (ver hallazgo real en el docstring del módulo).
