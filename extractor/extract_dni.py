@@ -563,16 +563,33 @@ def extract_dni(pdf_path):
                     fuente = lineas_frente_preprocesado
                 campos["DNI - Nombre"] = _solo_letras(_value_line(fuente, idx))
 
-            idx = _find_caption(lineas_frente, "Fecha", "nacimiento")
-            val = _value_line(lineas_frente, idx)
+            # Solo "NACIM" (no también "Fecha") -- la palabra "Fecha" se lee
+            # mal seguido (ej. "Eacha de nacimiento", la "F" confundida con
+            # "E") pero "nacimiento" es una palabra que no aparece en
+            # ninguna otra etiqueta del frente (a diferencia de "Fecha",
+            # que también está en "Fecha de emisión"/"Fecha de
+            # vencimiento"), así que alcanza como ancla única.
+            idx = _find_caption(lineas_frente, "NACIM")
+            fuente_fecha = lineas_frente
+            if idx is None:
+                idx = _find_caption(lineas_frente_preprocesado, "NACIM")
+                fuente_fecha = lineas_frente_preprocesado
+            val = _value_line(fuente_fecha, idx)
             fecha_frente = None
             if val:
-                tokens = val.split()
-                if len(tokens) >= 4:
-                    dia, mes, _mes_en, anio = tokens[0], tokens[1], tokens[2], tokens[-1]
-                    mes = re.sub(r"[^A-Z]", "", mes)
-                    if dia.isdigit() and anio.isdigit() and mes:
-                        fecha_frente = f"{dia} {mes} {anio}"
+                # Regex en vez de posición fija de tokens -- el renglón
+                # trae basura de OCR variable alrededor (ej. comilla suelta
+                # antes del día, o un token final tipo "A/O" después del
+                # año que antes se tomaba por error como si fuera el año).
+                m_dia = re.search(r"\b(\d{1,2})\b", val)
+                # Substring, no límite de palabra -- el mes en español suele
+                # salir pegado sin espacio a la abreviatura en inglés (ej.
+                # "ABR�APR", con un caracter de reemplazo de por medio) y
+                # un \b ahí no matchea.
+                m_mes = re.search(r"(ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)", val)
+                m_anio = re.search(r"\b(\d{4})\b", val)
+                if m_dia and m_mes and m_anio:
+                    fecha_frente = f"{m_dia.group(1)} {m_mes.group(1)} {m_anio.group(1)}"
             if fecha_frente and fecha_frente != campos["DNI - Fecha de nacimiento"]:
                 # Cuando hay desacuerdo entre MRZ y etiqueta impresa, se
                 # prioriza la etiqueta -- ver comentario de arriba.
