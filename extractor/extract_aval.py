@@ -73,12 +73,24 @@ patrón nuevo.
    como una transacción más del listado, y buscar en toda la página
    detectaba erróneamente ESE resumen como si fuera una factura de EDESA
    (hallazgo real 2026-08-12, devolvía todos los campos vacíos porque la
-   estructura no coincidía). LÍMITE CONOCIDO: pdfs-prueba/SERVICIO -
-   GASNOR.pdf es una foto/escaneo sin capa de texto (0 caracteres
-   extraíbles por pdfplumber) -- este módulo no hace OCR (a diferencia de
-   extract_dni.py), así que ese caso puntual devuelve todos los campos en
-   None. Si llegan muchos AVAL de este tipo como imagen, evaluar agregar
-   OCR acá también.
+   estructura no coincidía).
+
+OCR DE RESPALDO (2026-08-13): si el PDF no tiene capa de texto (foto/
+escaneo, 0 caracteres extraíbles por pdfplumber -- ej. pdfs-prueba/
+SERVICIO - GASNOR.pdf) se cae a OCR (Tesseract, mismo criterio que
+extract_dni.py) para armar las mismas "líneas" que arma pdf_layout.
+load_lines() a partir de texto nativo -- el resto del extractor
+(detección de plantilla, _extraer_*) no distingue el origen. LÍMITE
+CONOCIDO: el único ejemplo real de esta situación (SERVICIO - GASNOR.pdf)
+resultó ser, al inspeccionarlo, un "Comunicación de Terminación de
+Trabajos" (certificado de instalación de gas de 2019), NO una factura
+mensual -- no tiene un campo "Titular" de persona física en ningún lado
+(el único "propietario" que firma es un banco, con su CUIT). El OCR de
+respaldo por sí solo no alcanza para sacarle un nombre útil a ESE
+documento puntual porque el dato simplemente no está ahí, más allá de la
+calidad de la lectura -- pero deja la capacidad lista para el caso común
+de una factura de servicio real que llegue como foto en vez de PDF
+nativo.
 
 El domicilio (Monotributo y las 2 plantillas de ARCA) viene en una línea
 "Calle Número" (ej. "SANTIAGO DEL ESTERO 157"), a veces con un sufijo
@@ -99,10 +111,65 @@ Uso:
 """
 
 import json
+import os
 import re
 import sys
 
+import pdfplumber
+import pytesseract
+
 from pdf_layout import load_lines, find_line
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_TESSDATA_DIR = os.path.join(_HERE, "tessdata")
+os.environ.setdefault("TESSDATA_PREFIX", _TESSDATA_DIR)
+
+_TESSERACT_CMD = os.environ.get("TESSERACT_CMD", r"C:\Program Files\Tesseract-OCR\tesseract.exe")
+if os.path.exists(_TESSERACT_CMD):
+    pytesseract.pytesseract.tesseract_cmd = _TESSERACT_CMD
+
+_OCR_LINE_TOLERANCE = 15  # px -- cajas de OCR son más ruidosas que texto nativo del PDF
+
+
+def _ocr_lines(pdf_path):
+    """Respaldo para PDFs sin capa de texto (foto/escaneo, ver docstring
+    del módulo) -- arma "líneas" con la MISMA forma que devuelve
+    pdf_layout.load_lines() (una lista por página, cada línea con al menos
+    la clave "text") a partir de OCR, para que el resto del extractor
+    (detección de plantilla + _extraer_*) no tenga que distinguir el
+    origen del texto."""
+    pages_lines = []
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            im = page.to_image(resolution=300).original
+            data = pytesseract.image_to_data(im, lang="spa", output_type=pytesseract.Output.DICT)
+            words = []
+            for i in range(len(data["text"])):
+                t = data["text"][i].strip()
+                if not t:
+                    continue
+                words.append({"text": t, "x0": data["left"][i], "top": data["top"][i]})
+            words.sort(key=lambda w: w["top"])
+
+            lines = []
+            for w in words:
+                placed = False
+                for line in lines:
+                    if abs(line["top"] - w["top"]) <= _OCR_LINE_TOLERANCE:
+                        line["words"].append(w)
+                        n = len(line["words"])
+                        line["top"] = (line["top"] * (n - 1) + w["top"]) / n
+                        placed = True
+                        break
+                if not placed:
+                    lines.append({"top": w["top"], "words": [w]})
+
+            for line in lines:
+                line["words"].sort(key=lambda w: w["x0"])
+                line["text"] = " ".join(w["text"] for w in line["words"])
+            lines.sort(key=lambda l: l["top"])
+            pages_lines.append(lines)
+    return pages_lines
 
 
 def _clean(s):
@@ -428,7 +495,12 @@ def _extraer_cuil_cuit(page0, campos):
 
 def extract_aval(pdf_path):
     pages = load_lines(pdf_path)
-    page0 = pages[0]
+    page0 = pages[0] if pages else []
+    if not page0:
+        # Sin texto nativo (0 caracteres) -- probablemente una foto/escaneo
+        # en vez de un PDF con capa de texto. Ver docstring del módulo.
+        pages = _ocr_lines(pdf_path)
+        page0 = pages[0] if pages else []
     campos = _campos_vacios()
 
     plantilla = _detectar_plantilla(page0)
