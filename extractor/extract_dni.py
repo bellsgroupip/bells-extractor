@@ -100,6 +100,25 @@ LUCIANO.pdf, valor real confirmado "SALTA") donde NINGUNA combinación de
 threshold/recorte probada da un texto lo bastante limpio como para
 reconocerlo con confianza, ni con el respaldo de la lista de provincias.
 
+Domicilio, ruido pegado al final (2026-08-13, pedido explícito de Bells
+Group): el Domicilio se arma pegando 2 líneas del dorso, y la segunda a
+veces termina en basura de OCR después del contenido real (ej. "SALTA
+CAPITAL - SALLA. � -_" en vez de cortar en "SALTA CAPITAL -"). Se recorta
+del FINAL cualquier token que sea puro símbolo/dígito suelto, una letra
+sola, o una letra + símbolo pegado (ej. "3*", "B*") -- ver
+_recortar_cola_ruido. A propósito NO toca nada en el MEDIO del texto (ahí
+un error de OCR queda tal cual, no se inventa la corrección) -- por eso
+varios ejemplos calibrados siguen con ruido intercalado (ej. "ERe BUENA"
+en vez de "YERBA BUENA"), aceptado como límite conocido. Se aplicó en las
+DOS funciones que arman Domicilio (la nueva _extraer_domicilio_lugar_watermark
+Y la vieja _extraer_domicilio_lugar_cuil de respaldo) -- un caso real
+(GRAMAJO) reveló que el domicilio salía de la función vieja, que además
+NO tenía ningún filtro de calidad (aceptaba el primer resultado sin
+comparar, a diferencia de la nueva); se le agregó el mismo gate de
+_calidad_texto que ya usa la nueva, lo que de paso hizo que probara una
+variante de OCR mejor y el domicilio mejorara mucho más allá de solo
+sacar el ruido final.
+
 Uso:
     python3 extract_dni.py "../pdfs-prueba/DNI PAZ, AGUSTIN.pdf"
 """
@@ -313,7 +332,9 @@ def _extraer_domicilio_lugar_cuil(lineas_variantes):
                     if "NACIMIENTO" not in _normalizar(siguiente) and "CUIL" not in _normalizar(siguiente):
                         valor = f"{valor} {siguiente}".strip()
                 if valor:
-                    domicilio = valor
+                    candidato = _recortar_cola_ruido(valor)
+                    if candidato and _calidad_texto(candidato, min_letras=8) >= 0:
+                        domicilio = candidato
 
         if lugar_nacimiento is None:
             idx = _find_caption(lineas, "LUGAR", "NACIMIENTO")
@@ -389,6 +410,34 @@ def _provincia_mas_cercana(texto):
     return match[0] if match else None
 
 
+def _recortar_cola_ruido(texto):
+    """Recorta tokens sueltos al FINAL de un texto que son puro ruido de
+    OCR (ej. un "�" residual, un símbolo suelto, o una letra sola) --
+    común en Domicilio, que se arma pegando 2 líneas del dorso y a veces
+    la segunda línea termina en basura después del contenido real (ej.
+    "SALTA CAPITAL - SALLA. � -_" -> "SALTA CAPITAL -"). No toca nada en
+    el medio del texto -- ahí un error queda, no se inventa la
+    corrección."""
+    if not texto:
+        return texto
+    tokens = texto.split()
+    while tokens:
+        ultimo = tokens[-1]
+        letras = sum(1 for c in ultimo if c.isalpha())
+        if letras == 0:
+            tokens.pop()
+            continue
+        if len(ultimo) == 1 and not ultimo.isdigit():
+            tokens.pop()
+            continue
+        if letras == 1 and len(ultimo) <= 2 and any(not c.isalnum() for c in ultimo):
+            tokens.pop()
+            continue
+        break
+    resultado = " ".join(tokens).strip(" -:.,")
+    return resultado or None
+
+
 def _calidad_texto(s, min_letras):
     """Puntaje de qué tan "limpio" parece un texto de OCR -- se usa para
     elegir, entre varias pasadas de OCR con distinto preprocesado, cuál
@@ -462,7 +511,7 @@ def _extraer_domicilio_lugar_watermark(im1):
                     siguiente = lineas_texto[i + 1]
                     if "NACIM" not in _normalizar(siguiente) and "LUGAR" not in _normalizar(siguiente):
                         valor = f"{valor} {siguiente}".strip()
-                domicilio = valor or None
+                domicilio = _recortar_cola_ruido(valor)
                 break
             calidad_dom = _calidad_texto(domicilio, min_letras=10)
             if calidad_dom > mejor_domicilio["calidad"]:
