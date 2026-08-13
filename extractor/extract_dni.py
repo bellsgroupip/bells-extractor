@@ -37,6 +37,32 @@ completo. Cambios de fondo, en orden de cuándo se agregaron:
    un DNI antes de nacer) -- red de seguridad mínima, no filtra todos los
    casos (una fecha errónea pero no futura puede colarse igual si ni el
    MRZ ni la etiqueta la corrigen).
+5. Apellido/Nombre truncados (2026-08-13, pedido explícito de Bells
+   Group): el MRZ a veces trae el nombre cortado -- por dos motivos
+   DISTINTOS que necesitan chequeos EN DIRECCIONES OPUESTAS para
+   corregirse sin aceptar ruido:
+   - Falta el PRINCIPIO (ej. "NI CARRIZO" en vez de "MACCHIONI CARRIZO"):
+     pasa cuando la pasada de OCR por defecto del dorso corta la línea del
+     MRZ, pero la pasada "--psm 6" del mismo dorso la lee completa. Se
+     prefiere la lectura más larga entre las dos pasadas SOLO si la corta
+     es el FINAL de la larga (`_normalizar(larga).endswith(_normalizar(corta))`)
+     -- si no se exige esa dirección, cualquier lectura más larga se
+     aceptaba aunque lo agregado fuera ruido (hallazgo real: "JULIO" se
+     completaba a "JULIO SALEXIS" en vez de "JULIO ALEXIS", con una "S"
+     de más que no estaba en el documento).
+   - Falta el FINAL (ej. "LEOPOLD" en vez de "LEOPOLDO"): confirmado
+     visualmente contra un DNI real que el MRZ impreso en el documento
+     literalmente dice "LEOPOLD" -- no es un error de OCR, así es como
+     quedó grabado el MRZ. Ahí no hay nada que "leer mejor": la única
+     forma de completarlo es la etiqueta impresa grande del frente
+     ("Nombre / Name"), que si está legible trae el nombre completo. Se
+     compara SIEMPRE contra esa etiqueta (no solo cuando el campo está
+     vacío) y se prefiere si es más larga Y la corta es el PRINCIPIO de
+     la larga (`_normalizar(larga).startswith(_normalizar(corta))`) --
+     dirección opuesta a la anterior, porque acá lo que puede faltar es
+     el final, no el principio. Si la etiqueta del frente tampoco se
+     puede leer (pasa en algunos escaneos), este caso queda sin corregir
+     -- no hay una tercera fuente para el nombre.
 
 El formato "libreta" viejo (rectangular, sin bordes redondeados, sin MRZ
 en ninguna página) sigue sin extraer Apellido/Nombre/Documento de forma
@@ -559,7 +585,27 @@ def extract_dni(pdf_path):
                 texto_mrz_psm6 = pytesseract.image_to_string(im1, lang="spa", config="--psm 6")
                 mrz_psm6 = _parsear_mrz(_unir_lineas_mrz(texto_mrz_psm6))
                 for campo, valor in mrz_psm6.items():
-                    if not mrz[campo] and valor:
+                    if not valor:
+                        continue
+                    if not mrz[campo]:
+                        mrz[campo] = valor
+                    elif (
+                        campo in ("apellido", "nombre")
+                        and len(valor) > len(mrz[campo])
+                        and _normalizar(valor).endswith(_normalizar(mrz[campo]))
+                    ):
+                        # Apellido/Nombre: preferir la lectura más larga
+                        # SOLO si termina igual que la corta (el prefijo
+                        # que le falta a la corta se recuperó, no se
+                        # agregó texto nuevo al final) -- ej. "NI CARRIZO"
+                        # -> "MACCHIONI CARRIZO" (faltaba "MACCHIO" al
+                        # principio, mismo final). Sin este chequeo de
+                        # dirección se acepta cualquier lectura más larga
+                        # aunque la parte agregada sea ruido de OCR --
+                        # hallazgo real: "JULIO" -> "JULIO SALEXIS" (el
+                        # segundo nombre se agregó mal, no es una
+                        # recuperación real) se aceptaba antes por ser más
+                        # larga nomás.
                         mrz[campo] = valor
 
         # Algunos DNI viejos (formato "tarjeta" de primera generación, sin
@@ -621,21 +667,32 @@ def extract_dni(pdf_path):
             lineas_frente = _lineas_ocr(im0)
             lineas_frente_preprocesado = _lineas_ocr(_preprocesar(im0), psm=6)
 
-            if not campos["DNI - Apellido"]:
-                idx = _find_caption(lineas_frente, "Apellido")
+            def _completar_con_etiqueta_impresa(campo, etiqueta):
+                idx = _find_caption(lineas_frente, etiqueta)
                 fuente = lineas_frente
                 if idx is None:
-                    idx = _find_caption(lineas_frente_preprocesado, "Apellido")
+                    idx = _find_caption(lineas_frente_preprocesado, etiqueta)
                     fuente = lineas_frente_preprocesado
-                campos["DNI - Apellido"] = _solo_letras(_value_line(fuente, idx))
+                candidato = _solo_letras(_value_line(fuente, idx))
+                actual = campos[campo]
+                if not actual:
+                    campos[campo] = candidato
+                    return
+                if not candidato:
+                    return
+                # El MRZ a veces trae el nombre CORTADO tal cual está
+                # impreso en el documento real (confirmado visualmente en
+                # un ejemplo real 2026-08-12: el MRZ decía "LEOPOLD", no
+                # "LEOPOLDO", pero el nombre completo estaba en la
+                # etiqueta impresa del frente) -- si la etiqueta impresa
+                # trae un valor MÁS LARGO que empieza igual que el del
+                # MRZ, es la misma persona con más letras, no ruido, así
+                # que se prefiere.
+                if len(candidato) > len(actual) and _normalizar(candidato).startswith(_normalizar(actual)):
+                    campos[campo] = candidato
 
-            if not campos["DNI - Nombre"]:
-                idx = _find_caption(lineas_frente, "Nombre")
-                fuente = lineas_frente
-                if idx is None:
-                    idx = _find_caption(lineas_frente_preprocesado, "Nombre")
-                    fuente = lineas_frente_preprocesado
-                campos["DNI - Nombre"] = _solo_letras(_value_line(fuente, idx))
+            _completar_con_etiqueta_impresa("DNI - Apellido", "Apellido")
+            _completar_con_etiqueta_impresa("DNI - Nombre", "Nombre")
 
             # Solo "NACIM" (no también "Fecha") -- la palabra "Fecha" se lee
             # mal seguido (ej. "Eacha de nacimiento", la "F" confundida con
