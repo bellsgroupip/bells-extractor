@@ -78,6 +78,29 @@ en el Drive, y reglas de negocio importantes (ej. PEP, Sujeto Obligado UIF).
   5. DONE: Reglas de consistencia cruzada SOLICITUD vs DNI/AVAL (nombre, DNI, N° de
      documento, CUIT, y domicilio: Calle/Número/Localidad/Provincia) — nodo
      "Consolidar y Chequear" del workflow.
+     VALIDADO (2026-08-14) con un trío real sacado de Drive (no de /pdfs-prueba):
+     carpeta "AGUSTIN PAZ", SOLICITUD + DNI + AVAL del mismo cliente real. Nombre,
+     N° de documento, CUIT, fecha de nacimiento, Calle, Número y Provincia
+     coincidieron correctamente. FIX de un hallazgo real: la regla de Localidad
+     comparaba por igualdad EXACTA de string, y eso generaba un falso "no coincide"
+     porque la Solicitud traía la forma corta ("Tucuman") y el AVAL de ARCA la forma
+     oficial completa ("SAN MIGUEL DE TUCUMAN") — mismo patrón esperable en otras
+     capitales de provincia (San Salvador de Jujuy, San Fernando del Valle de
+     Catamarca, San Carlos de Bariloche). Cambiada a "una contiene a la otra" en vez
+     de igualdad exacta. Desplegado y verificado por API en el workflow real
+     (`KTfUznBbuRd0i3qj`) — diff nodo por nodo confirmó que solo "Consolidar y
+     Chequear" cambió, el resto del workflow quedó idéntico.
+     DONE (2026-08-14): formato "eye-flow" para los errores de cruce Solicitud vs
+     DNI/AVAL en el mail de informe — a pedido de Bells Group, cada error de "no
+     coincide" ya no es un párrafo corrido, sino 2-3 líneas separadas y con sangría
+     (qué dice la Solicitud / qué dice el DNI o AVAL, con el símbolo ⚠ al inicio),
+     con una línea en blanco entre cada error de la lista — para que se puedan
+     escanear de un vistazo en vez de verse todo junto. Nueva función
+     `campoNoCoincide()` en "Consolidar y Chequear" (reemplaza los 9 `errores.push`
+     de comparación Solicitud↔DNI/AVAL, Tercero Pagador queda con el formato viejo
+     por ahora — no se pidió) + `seccion()` en " Armar_Informe_Revision" ahora separa
+     los ítems de cada sección con línea en blanco. Desplegado y verificado por API
+     en `KTfUznBbuRd0i3qj` (diff nodo por nodo: solo esos 2 nodos cambiaron).
   6. Checklist "Validar DOC": DONE (best-effort) para los escenarios que Bells Group
      definió — ver nodo "Consolidar y Chequear". OJO: hoy solo verifica por NOMBRE DE
      ARCHIVO en la carpeta de Drive (no valida contenido ni a qué persona pertenece
@@ -166,3 +189,23 @@ en el Drive, y reglas de negocio importantes (ej. PEP, Sujeto Obligado UIF).
 ## Cómo probar
 Los PDF de /pdfs-prueba son solicitudes reales ya usadas para armar la base de
 referencia. Sirven para testear el extractor sin tener que esperar un mail nuevo.
+
+Para probar el CRUCE Solicitud vs DNI/AVAL hace falta un trío real (misma
+persona) — /pdfs-prueba tiene DNI/AVAL sueltos que NO corresponden a ninguna
+Solicitud ahí. Dos tríos reales completos confirmados en Google Drive (no
+descargados a /pdfs-prueba):
+- Carpeta "AGUSTIN PAZ": SOLICITUD.pdf + DNI + AVAL, caso simple (Tomador =
+  Vida Asegurada, 1 sola persona). Usado para validar y encontrar el fix de
+  Localidad del 2026-08-14 (ver punto 5 más arriba).
+- Carpeta "MIGNONE LUCIANO MACCHIONI CARRIZO CARLA GUADALUPE": Solicitud
+  Options con Solicitante Conjunto (2 personas), DNI + AVAL + CSSEM de cada
+  una. Todavía no usado para testear — sirve para validar el emparejamiento
+  por persona (punto 6 de más arriba) con un caso de más de un DNI/AVAL.
+
+Los archivos /pdfs-prueba/TEST AVAL trigger.pdf, TEST DNI trigger.pdf,
+test_aval_trigger.pdf y test_dni_trigger.pdf son placeholders con texto
+dummy ("PRUEBA TRIGGER") armados para probar el workflow separado
+Bells_Tabla_DNI_AVAL.json (punto 8 más arriba) — sirven para confirmar que
+el trigger de mail "AVALES" dispara y que los adjuntos se clasifican y
+cargan bien en las pestañas DNI/AVAL de la base, NO para validar la calidad
+de extracción (no tienen datos reales de DNI/AVAL adentro).
