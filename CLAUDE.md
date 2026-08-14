@@ -55,6 +55,15 @@ en el Drive, y reglas de negocio importantes (ej. PEP, Sujeto Obligado UIF).
      formato "libreta" vieja (sin MRZ, ejemplo real disponible pero sin
      calibrar del todo) sigue sin extraer Apellido/Nombre/Documento de forma
      confiable — necesitaría más ejemplos de ese formato para calibrar mejor.
+     FIX (2026-08-14, hallazgo real de un mail de prueba real — cliente
+     MERCADO EVANGELINA NATALIA): el MRZ a veces pierde la PRIMERA letra del
+     Apellido por una mala lectura de OCR puntual (acá la "M" de "MERCADO"
+     ni siquiera se reconoció como letra, dando "ERCADO"), y el código solo
+     tenía el chequeo de auto-corrección contra la etiqueta impresa del
+     frente en la dirección CONTRARIA (falta el FINAL, ej. "LEOPOLD" →
+     "LEOPOLDO"). Se agregó el chequeo simétrico (falta el PRINCIPIO) en
+     `_completar_con_etiqueta_impresa`. Regresión completa corrida contra
+     los 15 DNI reales de /pdfs-prueba antes de desplegar — 0 casos rotos.
      El AVAL no es una plantilla única -- extract_aval.py reconoce 2 (ARCA
      Monotributo y ANSES CUIL/CUIT, calibradas cada una contra un ejemplo
      real en /pdfs-prueba) detectando el TÍTULO del documento antes de

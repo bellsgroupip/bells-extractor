@@ -739,6 +739,18 @@ def extract_dni(pdf_path):
                 # que se prefiere.
                 if len(candidato) > len(actual) and _normalizar(candidato).startswith(_normalizar(actual)):
                     campos[campo] = candidato
+                    return
+                # Dirección opuesta -- el MRZ a veces pierde la PRIMERA
+                # letra del Apellido por una mala lectura de OCR puntual
+                # (hallazgo real 2026-08-14: "MERCADO" leído como basura +
+                # "ERCADO" en el MRZ, la "M" no reconocida como letra en
+                # absoluto). Si la etiqueta impresa del frente trae un
+                # valor MÁS LARGO que TERMINA igual que el del MRZ, es la
+                # misma persona con la letra inicial recuperada, no ruido
+                # agregado al final -- mismo criterio que el chequeo de
+                # arriba, dirección invertida.
+                if len(candidato) > len(actual) and _normalizar(candidato).endswith(_normalizar(actual)):
+                    campos[campo] = candidato
 
             _completar_con_etiqueta_impresa("DNI - Apellido", "Apellido")
             _completar_con_etiqueta_impresa("DNI - Nombre", "Nombre")
